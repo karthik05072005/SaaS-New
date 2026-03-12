@@ -9,7 +9,7 @@ import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { TenantService } from '../tenant/tenant.service';
 import { Role } from '../../common/constants/roles.constant';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { CreateUserDto, ChangePasswordDto } from './dto/create-user.dto';

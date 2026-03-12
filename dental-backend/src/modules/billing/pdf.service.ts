@@ -49,15 +49,28 @@ export class PdfService {
       doc.on('error', reject);
 
       // Register Fonts for Rupee Support
-      const regularPath = join(process.cwd(), 'src/assets/fonts/Roboto-Regular.ttf');
-      const boldPath = join(process.cwd(), 'src/assets/fonts/Roboto-Bold.ttf');
-      
-      try {
-        doc.registerFont('Roboto', regularPath);
-        doc.registerFont('Roboto-Bold', boldPath);
-      } catch (err) {
-        this.logger.error(`Failed to register fonts: ${err.message}`);
-        // Fallback or handle appropriately
+      // Try multiple potential asset paths for robustness in different environments (Local vs Vercel)
+      const potentialPaths = [
+        join(process.cwd(), 'src/assets/fonts'),           // Dev / Local
+        join(process.cwd(), 'assets/fonts'),               // Vercel / Dist
+        join(__dirname, '../../../assets/fonts'),          // Relative from src/modules/billing
+        join(__dirname, '../../assets/fonts'),             // Relative from dist/modules/billing
+      ];
+
+      let registered = false;
+      for (const basePath of potentialPaths) {
+        try {
+          const regular = join(basePath, 'Roboto-Regular.ttf');
+          const bold = join(basePath, 'Roboto-Bold.ttf');
+          doc.registerFont('Roboto', regular);
+          doc.registerFont('Roboto-Bold', bold);
+          registered = true;
+          break;
+        } catch { /* try next */ }
+      }
+
+      if (!registered) {
+        this.logger.warn('Custom fonts not found. Rupee symbol may not render correctly.');
       }
 
       // Colors
