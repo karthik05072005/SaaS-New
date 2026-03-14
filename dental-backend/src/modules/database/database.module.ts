@@ -8,6 +8,10 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
         uri: configService.get<string>('database.uri'),
+        // Serverless optimizations to prevent cold-start timeouts and connection exhaustion
+        serverSelectionTimeoutMS: 5000, 
+        maxPoolSize: 10,
+        socketTimeoutMS: 45000,
       }),
       inject: [ConfigService],
     }),

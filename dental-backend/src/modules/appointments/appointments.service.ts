@@ -166,12 +166,15 @@ export class AppointmentsService {
 
     const savedAppointment = await appointment.save();
 
-    // Send confirmation email to patient
-    try {
-      await this.sendAppointmentConfirmationEmail(tenantId, savedAppointment);
-    } catch (emailError) {
-      this.logger.error(`Failed to send confirmation email: ${emailError.message}`);
-    }
+    // Send confirmation email to patient in the background (fire-and-forget)
+    // This prevents the booking API from hanging and timing out on serverless environments
+    this.sendAppointmentConfirmationEmail(tenantId, savedAppointment).catch(
+      (emailError) => {
+        this.logger.error(
+          `Failed to send confirmation email: ${emailError.message}`,
+        );
+      },
+    );
 
     return savedAppointment;
   }
@@ -304,9 +307,10 @@ export class AppointmentsService {
 
     return this.appointmentModel
       .find(query as any)
+      .lean() // Serverless optimization: returns raw JS objects, vastly reducing memory usage
       .populate('patientId', 'name phone email patientId')
       .populate('doctorId', 'name doctorProfile')
-      .exec();
+      .exec() as unknown as AppointmentDocument[];
   }
 
   async findOne(tenantId: string, id: string): Promise<AppointmentDocument> {
