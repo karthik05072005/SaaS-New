@@ -343,7 +343,7 @@ export class BillingService {
       invoiceDate: new Date((invoice as any).createdAt).toLocaleDateString('en-IN'),
       grandTotal: invoice.grandTotal,
       pdfUrl,
-      lineItems: invoice.lineItems,
+      lineItems: invoice.lineItems || [],
     }).catch(err => this.logger.error(`Failed to send invoice reminder: ${err.message}`));
 
     return { success: true, message: 'Reminder sent successfully' };
@@ -364,14 +364,14 @@ export class BillingService {
       patientName: patient?.name ?? '',
       patientId: patient?.patientId ?? '',
       patientPhone: patient?.phone ?? '',
-      lineItems: invoice.lineItems,
+      lineItems: invoice.lineItems || [],
       subtotal: invoice.subtotal,
       totalDiscount: invoice.totalDiscount,
       totalTax: invoice.totalTax,
       grandTotal: invoice.grandTotal,
       paidAmount: invoice.paidAmount,
       pendingAmount: invoice.pendingAmount,
-      payments: invoice.payments.map((p) => ({
+      payments: (invoice.payments || []).map((p) => ({
         amount: p.amount,
         mode: p.mode,
         paidAt: new Date(p.paidAt).toLocaleDateString('en-IN'),
@@ -504,14 +504,14 @@ export class BillingService {
       patientName: patient?.name ?? 'Patient',
       patientId: patient?.patientId ?? id,
       patientPhone: patient?.phone ?? '',
-      lineItems: invoice.lineItems,
+      lineItems: invoice.lineItems || [],
       subtotal: invoice.subtotal,
       totalDiscount: invoice.totalDiscount,
       totalTax: invoice.totalTax,
       grandTotal: invoice.grandTotal,
       paidAmount: invoice.paidAmount,
       pendingAmount: invoice.pendingAmount,
-      payments: invoice.payments.map((p) => ({
+      payments: (invoice.payments || []).map((p) => ({
         amount: p.amount,
         mode: p.mode,
         paidAt: new Date(p.paidAt).toLocaleDateString('en-IN'),

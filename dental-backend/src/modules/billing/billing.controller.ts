@@ -10,7 +10,6 @@ import {
   UseGuards,
   Request,
   Res,
-  StreamableFile,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -177,7 +176,7 @@ export class BillingController {
   async downloadInvoicePdf(
     @Request() req: any,
     @Param('id') id: string,
-    @Res({ passthrough: true }) res: any,
+    @Res() res: any,
   ) {
     const { buffer, filename } = await this.billingService.downloadInvoicePdf(
       req.tenantId,
@@ -189,7 +188,7 @@ export class BillingController {
       'Content-Length': buffer.length.toString(),
       'Cache-Control': 'no-store',
     });
-    return new StreamableFile(buffer);
+    res.status(200).send(buffer);
   }
 
   // ── Advance Payments ─────────────────────────────────────────────────────────
