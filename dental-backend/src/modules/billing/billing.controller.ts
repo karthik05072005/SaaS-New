@@ -178,17 +178,27 @@ export class BillingController {
     @Param('id') id: string,
     @Res() res: any,
   ) {
-    const { buffer, filename } = await this.billingService.downloadInvoicePdf(
-      req.tenantId,
-      id,
-    );
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${filename}"`,
-      'Content-Length': buffer.length.toString(),
-      'Cache-Control': 'no-store',
-    });
-    res.status(200).send(buffer);
+    try {
+      const { buffer, filename } = await this.billingService.downloadInvoicePdf(
+        req.tenantId,
+        id,
+      );
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': buffer.length.toString(),
+        'Cache-Control': 'no-store',
+      });
+      res.status(200).send(buffer);
+    } catch (error: any) {
+      console.error('Download PDF Error:', error);
+      res.status(500).json({ 
+        success: false, 
+        message: 'Failed to generate or download PDF', 
+        error: error.message,
+        stack: error.stack 
+      });
+    }
   }
 
   // ── Advance Payments ─────────────────────────────────────────────────────────
