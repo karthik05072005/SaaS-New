@@ -319,12 +319,13 @@ export class AppointmentsService {
         _id: new Types.ObjectId(id),
         tenantId: new Types.ObjectId(tenantId),
       } as any)
-      .populate('patientId', 'name phone patientId')
+      .lean() // Serverless optimization: returns raw JS objects
+      .populate('patientId', 'name phone patientId photoUrl email')
       .populate('doctorId', 'name email role doctorProfile')
       .populate('createdBy', 'name email');
 
     if (!appointment) throw new NotFoundException('Appointment not found');
-    return appointment;
+    return appointment as unknown as AppointmentDocument;
   }
 
   async update(

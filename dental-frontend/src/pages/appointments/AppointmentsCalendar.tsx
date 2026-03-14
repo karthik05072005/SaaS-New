@@ -51,6 +51,9 @@ interface CalendarEvent {
     phone?: string;
     email?: string;
     chairId?: string;
+    photoUrl?: string;
+    tokenNumber?: number;
+    rawAppointment?: any;
 }
 
 
@@ -288,6 +291,9 @@ export function AppointmentsCalendar() {
                 phone: patient?.phone,
                 email: patient?.email,
                 chairId: appt.chairId as string | undefined,
+                photoUrl: patient?.photoUrl as string | undefined,
+                tokenNumber: appt.tokenNumber as number | undefined,
+                rawAppointment: appt,
             };
         });
     }, [appointments]);
@@ -300,16 +306,15 @@ export function AppointmentsCalendar() {
 
     const handleSelectEvent = async (event: CalendarEvent) => {
         if (!event.id) return;
-        try {
-            const res = await api.get(`/appointments/${event.id}`);
-            // Backend may return the appointment directly or wrapped in { data: {} }
-            const apptData = res.data?.data || res.data;
-            setSelectedAppointment(apptData);
-            setIsDetailDialogOpen(true);
-        } catch {
+
+        // INSTANT UI FEEDBACK: Use the cached data from the calendar view to open the dialog instantly 
+        // without waiting for the slow serverless environment to respond!
+        if (event.rawAppointment) {
+            setSelectedAppointment(event.rawAppointment as AppointmentDetail);
+        } else {
             setSelectedAppointment({
                 _id: event.id || '',
-                patientId: { _id: '', name: event.patientName || '', phone: event.phone || '', email: event.email },
+                patientId: { _id: '', name: event.patientName || '', phone: event.phone || '', email: event.email, photoUrl: event.photoUrl },
                 doctorId: { _id: '', name: event.doctorName || '' },
                 date: format(event.start, 'yyyy-MM-dd'),
                 startTime: format(event.start, 'HH:mm'),
@@ -319,8 +324,19 @@ export function AppointmentsCalendar() {
                 chiefComplaint: event.chiefComplaint,
                 notes: event.notes,
                 duration: 30,
+                tokenNumber: event.tokenNumber,
             });
-            setIsDetailDialogOpen(true);
+        }
+        setIsDetailDialogOpen(true);
+
+        // Background fetch to get fresh updates transparently
+        try {
+            const res = await api.get(`/appointments/${event.id}`);
+            const apptData = res.data?.data || res.data;
+            // Only update if dialog is still open
+            setSelectedAppointment(prev => prev ? { ...prev, ...apptData } : apptData);
+        } catch {
+            // Silently fail the fresh fetch, the cached UI is enough
         }
     };
 
