@@ -67,7 +67,7 @@ interface Doctor {
 
 interface AppointmentDetail {
     _id: string;
-    patientId: { _id: string; name: string; phone: string; email?: string };
+    patientId: { _id: string; name: string; phone: string; email?: string; photoUrl?: string };
     doctorId: { _id: string; name: string };
     date: string;
     startTime: string;
@@ -1059,9 +1059,17 @@ export function AppointmentsCalendar() {
                                 {/* Patient card */}
                                 <div className="bg-gray-50 rounded-xl p-4 space-y-2.5">
                                     <div className="flex items-center gap-3">
-                                        <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-sm">
-                                            {selectedAppointment.patientId.name.charAt(0)}
-                                        </div>
+                                        {selectedAppointment.patientId.photoUrl ? (
+                                            <img 
+                                                src={selectedAppointment.patientId.photoUrl} 
+                                                alt={selectedAppointment.patientId.name} 
+                                                className="w-12 h-12 rounded-full object-cover border-2 border-white shadow-sm shrink-0"
+                                            />
+                                        ) : (
+                                            <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-lg shadow-sm border-2 border-white shrink-0">
+                                                {selectedAppointment.patientId.name.charAt(0)}
+                                            </div>
+                                        )}
                                         <div>
                                             <p className="font-semibold text-gray-900">{selectedAppointment.patientId.name}</p>
                                             <p className="text-xs text-gray-500">Patient</p>
