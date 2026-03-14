@@ -65,8 +65,10 @@ export class PdfService {
           const bold = join(basePath, 'Roboto-Bold.ttf');
 
           if (fs.existsSync(regular) && fs.existsSync(bold)) {
-            doc.registerFont('Roboto', regular);
-            doc.registerFont('Roboto-Bold', bold);
+            const regularBuffer = fs.readFileSync(regular);
+            const boldBuffer = fs.readFileSync(bold);
+            doc.registerFont('Roboto', regularBuffer);
+            doc.registerFont('Roboto-Bold', boldBuffer);
             registered = true;
             break;
           }
