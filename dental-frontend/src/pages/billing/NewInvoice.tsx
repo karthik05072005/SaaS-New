@@ -132,23 +132,6 @@ export function NewInvoice() {
             title="Create Invoice"
             description="Generate a new bill for a patient's treatment."
             headerContent={headerContent}
-            action={
-                <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => window.print()}>Preview</Button>
-                    <Button 
-                        className="bg-blue-600 hover:bg-blue-700" 
-                        onClick={handleSave}
-                        disabled={createInvoice.isPending || issueInvoice.isPending}
-                    >
-                        {(createInvoice.isPending || issueInvoice.isPending) ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                            <Save className="mr-2 h-4 w-4" />
-                        )}
-                        Save & Issue
-                    </Button>
-                </div>
-            }
         >
             <Card className="border-slate-200 shadow-sm">
                 <CardContent className="p-6">
@@ -336,6 +319,21 @@ export function NewInvoice() {
                                 <p className="text-[10px] text-slate-400 text-right italic font-medium">
                                     * Final amount is verified by the backend.
                                 </p>
+                                <div className="pt-4 flex justify-end gap-3 mt-4 w-full">
+                                    <Button variant="outline" onClick={() => window.print()} className="w-full">Preview</Button>
+                                    <Button 
+                                        className="bg-blue-600 hover:bg-blue-700 w-full" 
+                                        onClick={handleSave}
+                                        disabled={createInvoice.isPending || issueInvoice.isPending}
+                                    >
+                                        {(createInvoice.isPending || issueInvoice.isPending) ? (
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        ) : (
+                                            <Save className="mr-2 h-4 w-4" />
+                                        )}
+                                        Save & Issue
+                                    </Button>
+                                </div>
                             </div>
                         </div>
                     </div>

@@ -317,6 +317,38 @@ export class BillingService {
     return invoice as unknown as InvoiceDocument;
   }
 
+  async sendReminder(tenantId: string, id: string): Promise<{ success: boolean; message: string }> {
+    const invoice = await this.invoiceModel
+      .findOne({
+        _id: new Types.ObjectId(id),
+        tenantId: new Types.ObjectId(tenantId),
+      } as any)
+      .populate('patientId', 'name email');
+
+    if (!invoice) throw new NotFoundException('Invoice not found');
+
+    const patient = invoice.patientId as any;
+    if (!patient?.email) throw new BadRequestException('Patient has no email address configured');
+
+    let pdfUrl = invoice.pdfUrl;
+    if (!pdfUrl) {
+      pdfUrl = await this.generateAndSavePdf(tenantId, invoice as unknown as InvoiceDocument);
+    }
+
+    this.emailService.sendInvoiceEmail({
+      patientName: patient.name,
+      patientEmail: patient.email,
+      clinicName: this.getClinicInfo().clinicName,
+      invoiceNumber: invoice.invoiceNumber,
+      invoiceDate: new Date((invoice as any).createdAt).toLocaleDateString('en-IN'),
+      grandTotal: invoice.grandTotal,
+      pdfUrl,
+      lineItems: invoice.lineItems,
+    }).catch(err => this.logger.error(`Failed to send invoice reminder: ${err.message}`));
+
+    return { success: true, message: 'Reminder sent successfully' };
+  }
+
   private async generateAndSavePdf(tenantId: string, invoice: InvoiceDocument) {
     const patient = invoice.patientId as any;
     const clinic = this.getClinicInfo();

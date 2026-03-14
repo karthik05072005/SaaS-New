@@ -113,6 +113,12 @@ export class BillingController {
     return this.billingService.issueInvoice(req.tenantId, id);
   }
 
+  @Post('invoices/:id/remind')
+  @ApiOperation({ summary: 'Send email reminder for an invoice' })
+  sendReminder(@Request() req: any, @Param('id') id: string) {
+    return this.billingService.sendReminder(req.tenantId, id);
+  }
+
   @Post('invoices/:id/payment')
   @ApiOperation({ summary: 'Record a payment for invoice' })
   recordPayment(

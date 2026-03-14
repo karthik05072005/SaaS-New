@@ -8,7 +8,7 @@ import {
     Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '../../components/ui/table';
 import { Badge } from '../../components/ui/badge';
-import { MoreHorizontal, Plus, Search, FileText, Loader2 } from 'lucide-react';
+import { MoreHorizontal, Plus, Search, FileText, Loader2, Download, Bell } from 'lucide-react';
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
@@ -21,12 +21,14 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "../../components/ui/dialog";
-import { useInvoices, useRecordPayment } from '../../hooks/useBilling';
+import { useInvoices, useRecordPayment, useSendReminder } from '../../hooks/useBilling';
+import api from '../../lib/api';
 
 export function BillingList() {
     const navigate = useNavigate();
     const [searchTerm, setSearchTerm] = useState('');
     const recordPayment = useRecordPayment();
+    const sendReminder = useSendReminder();
     
     // Payment Dialog State
     const [paymentAmount, setPaymentAmount] = useState<number>(0);
@@ -53,6 +55,22 @@ export function BillingList() {
             default: return <Badge variant="outline">{status}</Badge>;
         }
     }
+
+    const handleDownload = async (invId: string, invNo: string) => {
+        try {
+            const res = await api.get(`/invoices/${invId}/download`, { responseType: 'blob' });
+            const url = window.URL.createObjectURL(new Blob([res.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `invoice-${invNo}.pdf`);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+        } catch {
+            alert('Failed to download invoice');
+        }
+    };
 
     return (
         <PageWrapper
@@ -133,7 +151,16 @@ export function BillingList() {
                                             <TableCell className="hidden md:table-cell">{date}</TableCell>
                                             <TableCell className="font-semibold">₹{amount.toLocaleString('en-IN')}</TableCell>
                                             <TableCell>{getStatusBadge(inv.status ?? '')}</TableCell>
-                                            <TableCell className="text-right">
+                                            <TableCell className="text-right flex justify-end gap-1 items-center">
+                                                <Button 
+                                                    variant="ghost" 
+                                                    size="icon" 
+                                                    title="Download PDF" 
+                                                    onClick={() => handleDownload(invId, invNo)}
+                                                    className="h-8 w-8 text-slate-500 hover:text-blue-600"
+                                                >
+                                                    <Download className="h-4 w-4" />
+                                                </Button>
                                                 <DropdownMenu>
                                                     <DropdownMenuTrigger asChild>
                                                         <Button variant="ghost" className="h-8 w-8 p-0">
@@ -199,8 +226,23 @@ export function BillingList() {
                                                                 </DialogFooter>
                                                             </DialogContent>
                                                         </Dialog>
-                                                        <DropdownMenuSeparator />
-                                                        <DropdownMenuItem>Send Reminder</DropdownMenuItem>
+                                                        
+                                                        {(!inv.status || inv.status !== 'PAID' && inv.status !== 'DRAFT') && (
+                                                            <>
+                                                                <DropdownMenuSeparator />
+                                                                <DropdownMenuItem 
+                                                                    onClick={() => {
+                                                                        sendReminder.mutate(invId, {
+                                                                            onSuccess: () => alert('Reminder email sent to patient!')
+                                                                        });
+                                                                    }}
+                                                                    disabled={sendReminder.isPending}
+                                                                >
+                                                                    <Bell className="mr-2 h-4 w-4 text-orange-500" />
+                                                                    Send Reminder
+                                                                </DropdownMenuItem>
+                                                            </>
+                                                        )}
                                                     </DropdownMenuContent>
                                                 </DropdownMenu>
                                             </TableCell>

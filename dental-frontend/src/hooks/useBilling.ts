@@ -134,6 +134,15 @@ export function useCancelInvoice() {
     });
 }
 
+export function useSendReminder() {
+    return useMutation({
+        mutationFn: async (id: string) => {
+            const res = await api.post(`/invoices/${id}/remind`);
+            return res.data;
+        },
+    });
+}
+
 // ─── Advance Payments ────────────────────────────────────────────────────────
 export function useAdvanceBalance(patientId: string) {
     return useQuery({
