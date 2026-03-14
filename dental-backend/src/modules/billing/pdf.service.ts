@@ -73,6 +73,9 @@ export class PdfService {
         this.logger.warn('Custom fonts not found. Rupee symbol may not render correctly.');
       }
 
+      const fontRegular = registered ? 'Roboto' : 'Helvetica';
+      const fontBold = registered ? 'Roboto-Bold' : 'Helvetica-Bold';
+
       // Colors
       const primaryColor = '#0D9488'; // Teal-600
       const secondaryColor = '#475569'; // Slate-600
@@ -87,10 +90,10 @@ export class PdfService {
       doc
         .fillColor('white')
         .fontSize(24)
-        .font('Roboto-Bold')
+        .font(fontBold)
         .text(data.clinicName, 40, 40)
         .fontSize(10)
-        .font('Roboto')
+        .font(fontRegular)
         .text(data.clinicAddress, 40, 70, { width: 300 })
         .text(`Phone: ${data.clinicPhone}`, 40, 95);
 
@@ -100,7 +103,7 @@ export class PdfService {
 
       doc
         .fontSize(28)
-        .font('Roboto-Bold')
+        .font(fontBold)
         .text('INVOICE', 400, 45, { align: 'right' });
 
       // Reset text color
@@ -119,14 +122,14 @@ export class PdfService {
       
       doc
         .fontSize(10)
-        .font('Roboto-Bold')
+        .font(fontBold)
         .fillColor(primaryColor)
         .text('BILL TO:', 55, detailsTop + 15)
         .fillColor('black')
         .fontSize(12)
         .text(data.patientName, 55, detailsTop + 30)
         .fontSize(9)
-        .font('Roboto')
+        .font(fontRegular)
         .fillColor(secondaryColor)
         .text(`ID: ${data.patientId}`, 55, detailsTop + 50)
         .text(`Phone: ${data.patientPhone}`, 55, detailsTop + 65);
@@ -134,7 +137,7 @@ export class PdfService {
       // Invoice Info Box
       doc
         .fontSize(10)
-        .font('Roboto-Bold')
+        .font(fontBold)
         .text('Invoice #:', 350, detailsTop + 15)
         .text('Date:', 350, detailsTop + 35)
         .text('Status:', 350, detailsTop + 55);
@@ -142,11 +145,11 @@ export class PdfService {
       const statusColor = data.pendingAmount <= 0 ? '#10B981' : '#F59E0B';
       
       doc
-        .font('Roboto')
+        .font(fontRegular)
         .text(data.invoiceNumber, 450, detailsTop + 15)
         .text(data.invoiceDate, 450, detailsTop + 35)
         .fillColor(statusColor)
-        .font('Roboto-Bold')
+        .font(fontBold)
         .text(data.pendingAmount <= 0 ? 'PAID' : 'PENDING', 450, detailsTop + 55);
 
       doc.fillColor('black');
@@ -160,7 +163,7 @@ export class PdfService {
       doc
         .fillColor('white')
         .fontSize(9)
-        .font('Roboto-Bold')
+        .font(fontBold)
         .text('Description', 50, tableTop + 8)
         .text('Qty', 280, tableTop + 8, { width: 40, align: 'center' })
         .text('Unit Price', 330, tableTop + 8, { width: 70, align: 'right' })
@@ -169,7 +172,7 @@ export class PdfService {
 
       // ── Line Items ────────────────────────────────────────────────────
       let itemY = tableTop + 35;
-      doc.fillColor('black').font('Roboto').fontSize(9);
+      doc.fillColor('black').font(fontRegular).fontSize(9);
 
       for (const item of data.lineItems) {
         // Alternating background or subtle border
@@ -191,7 +194,7 @@ export class PdfService {
 
       doc
         .fontSize(10)
-        .font('Roboto')
+        .font(fontRegular)
         .fillColor(secondaryColor)
         .text('Subtotal:', colX, summaryY)
         .text(`₹${data.subtotal.toFixed(2)}`, 480, summaryY, { align: 'right' });
@@ -211,7 +214,7 @@ export class PdfService {
       doc
         .fillColor(primaryColor)
         .fontSize(14)
-        .font('Roboto-Bold')
+        .font(fontBold)
         .text('Grand Total:', colX, summaryY + 70)
         .text(`₹${data.grandTotal.toFixed(2)}`, 450, summaryY + 70, { align: 'right', width: 95 });
 
@@ -220,11 +223,11 @@ export class PdfService {
         doc
           .fillColor('black')
           .fontSize(10)
-          .font('Roboto-Bold')
+          .font(fontBold)
           .text('Payment History:', 40, summaryY);
         
         let py = summaryY + 20;
-        doc.fontSize(8).font('Roboto').fillColor(secondaryColor);
+        doc.fontSize(8).font(fontRegular).fillColor(secondaryColor);
         for (const p of data.payments) {
           doc.text(`${p.paidAt} — ${p.mode} — ₹${p.amount.toFixed(2)}`, 40, py);
           py += 15;
@@ -242,7 +245,7 @@ export class PdfService {
         .fontSize(8)
         .fillColor(secondaryColor)
         .text('This is a computer-generated invoice.', 0, footerY + 15, { align: 'center' })
-        .font('Roboto-Bold')
+        .font(fontBold)
         .text(`Thank you for visiting ${data.clinicName}!`, 0, footerY + 30, { align: 'center' });
 
       doc.end();
