@@ -67,8 +67,13 @@ export function BillingList() {
             link.click();
             link.remove();
             window.URL.revokeObjectURL(url);
-        } catch {
-            alert('Failed to download invoice');
+        } catch (error: any) {
+            if (error.response?.data instanceof Blob) {
+                const text = await error.response.data.text();
+                alert('Server Error Details: ' + text);
+            } else {
+                alert('Failed to download invoice: ' + (error.message || 'Unknown error'));
+            }
         }
     };
 
