@@ -7,10 +7,11 @@ import 'react-big-calendar/lib/css/react-big-calendar.css';
 import { PageWrapper } from '../../components/layout/PageWrapper';
 import { Button } from '../../components/ui/button';
 import {
-    Plus, X, Loader2, Mail, Phone, Clock, Calendar as CalendarIcon,
-    User, Stethoscope, FileText, CheckCircle2, AlertCircle,
-    Sparkles, Camera, Image as ImageIcon, CameraOff
+    Plus, X, Loader2, Calendar as CalendarIcon,
+    User, Stethoscope, CheckCircle2, AlertCircle,
+    Sparkles, Camera, Image as ImageIcon, Search
 } from 'lucide-react';
+import { Badge } from '../../components/ui/badge';
 import { Card, CardContent } from '../../components/ui/card';
 import {
     Dialog,
@@ -20,7 +21,6 @@ import {
 } from '../../components/ui/dialog';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
-import { Textarea } from '../../components/ui/textarea';
 import {
     Select,
     SelectContent,
@@ -121,7 +121,15 @@ export function AppointmentsCalendar() {
     const [bookingSuccess, setBookingSuccess] = useState<BookingSuccess | null>(null);
     const [bookingError, setBookingError] = useState<string | null>(null);
 
-    // Form state — patient details are always entered directly (no DB search)
+    // Form state — patient selection
+    const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
+    const [selectedPatientName, setSelectedPatientName] = useState<string>('');
+    const [patientSearchQuery, setPatientSearchQuery] = useState('');
+    const [patientSearchResults, setPatientSearchResults] = useState<any[]>([]);
+    const [isSearchingPatients, setIsSearchingPatients] = useState(false);
+    const [isExistingPatientMode, setIsExistingPatientMode] = useState(false);
+
+    // Form state — new patient details
     const [newPatientName, setNewPatientName] = useState('');
     const [newPatientPhone, setNewPatientPhone] = useState('');
     const [selectedDoctor, setSelectedDoctor] = useState<string>('');
@@ -147,27 +155,44 @@ export function AppointmentsCalendar() {
     const [stream, setStream] = useState<MediaStream | null>(null);
     const uploadFile = useUploadFile();
 
+    // Patient search effect
+    useEffect(() => {
+        const delayDebounceFn = setTimeout(async () => {
+            if (patientSearchQuery.trim().length >= 2) {
+                setIsSearchingPatients(true);
+                try {
+                    const res = await api.get('/patients/search', { params: { q: patientSearchQuery } });
+                    setPatientSearchResults(Array.isArray(res.data) ? res.data : (res.data?.data || []));
+                } catch (error) {
+                    console.error('Patient search failed:', error);
+                } finally {
+                    setIsSearchingPatients(false);
+                }
+            } else {
+                setPatientSearchResults([]);
+            }
+        }, 300);
+
+        return () => clearTimeout(delayDebounceFn);
+    }, [patientSearchQuery]);
+
     // Robust video element binding
     useEffect(() => {
         const video = videoRef.current;
         if (showCamera && stream && video) {
-            // Only assign if it's different to avoid flickering/restarts
             if (video.srcObject !== stream) {
                 video.srcObject = stream;
             }
-            
-            // Explicitly try to play
             const tryPlay = async () => {
                 try {
                     await video.play();
                 } catch (err) {
                     console.error("Auto-play failed:", err);
-                    // This often happens due to browser policy; troubleshootMode handles this via guidance
                 }
             };
             tryPlay();
         }
-    }, [showCamera, stream, videoRef.current]); // videoRef.current included to catch mounting
+    }, [showCamera, stream, videoRef.current]);
 
     // Request camera when showCamera is toggled ON
     useEffect(() => {
@@ -179,7 +204,6 @@ export function AppointmentsCalendar() {
 
             const initCamera = async () => {
                 try {
-                    // Maximum compatibility constraints
                     const mediaStream = await navigator.mediaDevices.getUserMedia({ 
                         video: { facingMode: 'user' } 
                     });
@@ -191,24 +215,10 @@ export function AppointmentsCalendar() {
 
                     const videoTrack = mediaStream.getVideoTracks()[0];
                     if (videoTrack) {
-                        // Diagnostic: Check if track is muted (hardware block)
                         if (videoTrack.muted) {
                             setBookingError("Your laptop's camera is physically blocked or disabled in privacy settings.");
                             setTroubleshootMode(true);
                         }
-                        
-                        videoTrack.onmute = () => {
-                            if (isMounted) {
-                                setBookingError("Camera hardware was muted.");
-                                setTroubleshootMode(true);
-                            }
-                        };
-                        videoTrack.onunmute = () => {
-                            if (isMounted) {
-                                setBookingError(null);
-                                setTroubleshootMode(false);
-                            }
-                        };
                     }
 
                     setStream(mediaStream);
@@ -218,9 +228,7 @@ export function AppointmentsCalendar() {
                     setIsCameraInitializing(false);
                     console.error("Camera access error:", err);
                     if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-                        setBookingError("Camera Access Blocked: Please look at your browser's address bar to ALLOW camera access.");
-                    } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-                        setBookingError("No camera found. Please plug in a webcam.");
+                        setBookingError("Camera Access Blocked: Please allow camera access in your browser.");
                     } else {
                         setBookingError(`Webcam Error: ${err.message}`);
                     }
@@ -246,12 +254,10 @@ export function AppointmentsCalendar() {
     const { data: appointments = [] } = useCalendarAppointments(startDate, endDate);
     const createAppointment = useCreateAppointment();
 
-    // Fetch doctors from real DB — /users/doctors returns array directly (no wrapper)
     useEffect(() => {
         const fetchDoctors = async () => {
             try {
                 const res = await api.get('/users/doctors');
-                // The endpoint returns the array directly, not wrapped in { data: [] }
                 const doctorList = Array.isArray(res.data) ? res.data : (res.data.data || []);
                 setDoctors(doctorList);
             } catch (error) {
@@ -266,33 +272,33 @@ export function AppointmentsCalendar() {
     const bookedSlots: string[] = slotData?.booked || [];
 
     const events: CalendarEvent[] = useMemo(() => {
-        return appointments.map((appt: Record<string, unknown>) => {
-            const apptDate = new Date(appt.date as string);
+        return appointments.map((appt: any) => {
+            const apptDate = new Date(appt.date);
             const [startHour, startMin] = (appt.startTime as string).split(':');
             const [endHour, endMin] = (appt.endTime as string).split(':');
             const start = new Date(apptDate);
             start.setHours(parseInt(startHour), parseInt(startMin), 0, 0);
             const end = new Date(apptDate);
             end.setHours(parseInt(endHour), parseInt(endMin), 0, 0);
-            const patient = appt.patientId as Record<string, string> | undefined;
-            const doctor = appt.doctorId as Record<string, string> | undefined;
+            const patient = appt.patientId;
+            const doctor = appt.doctorId;
             const patientName = patient?.name || 'Unknown Patient';
             const doctorName = doctor?.name || 'Unknown Doctor';
             const type = (appt.type as string) || 'Appointment';
             return {
-                id: appt._id as string,
+                id: appt._id,
                 title: `${type} - ${patientName}`,
                 start, end,
                 resource: doctorName,
-                status: appt.status as string,
+                status: appt.status,
                 patientName, doctorName, type,
-                chiefComplaint: appt.chiefComplaint as string,
-                notes: appt.notes as string,
+                chiefComplaint: appt.chiefComplaint,
+                notes: appt.notes,
                 phone: patient?.phone,
                 email: patient?.email,
-                chairId: appt.chairId as string | undefined,
-                photoUrl: patient?.photoUrl as string | undefined,
-                tokenNumber: appt.tokenNumber as number | undefined,
+                chairId: appt.chairId,
+                photoUrl: patient?.photoUrl,
+                tokenNumber: appt.tokenNumber,
                 rawAppointment: appt,
             };
         });
@@ -306,11 +312,8 @@ export function AppointmentsCalendar() {
 
     const handleSelectEvent = async (event: CalendarEvent) => {
         if (!event.id) return;
-
-        // INSTANT UI FEEDBACK: Use the cached data from the calendar view to open the dialog instantly 
-        // without waiting for the slow serverless environment to respond!
         if (event.rawAppointment) {
-            setSelectedAppointment(event.rawAppointment as AppointmentDetail);
+            setSelectedAppointment(event.rawAppointment);
         } else {
             setSelectedAppointment({
                 _id: event.id || '',
@@ -328,19 +331,19 @@ export function AppointmentsCalendar() {
             });
         }
         setIsDetailDialogOpen(true);
-
-        // Background fetch to get fresh updates transparently
         try {
             const res = await api.get(`/appointments/${event.id}`);
             const apptData = res.data?.data || res.data;
-            // Only update if dialog is still open
             setSelectedAppointment(prev => prev ? { ...prev, ...apptData } : apptData);
-        } catch {
-            // Silently fail the fresh fetch, the cached UI is enough
-        }
+        } catch {}
     };
 
     const resetForm = () => {
+        setSelectedPatientId(null);
+        setSelectedPatientName('');
+        setPatientSearchQuery('');
+        setPatientSearchResults([]);
+        setIsExistingPatientMode(false);
         setNewPatientName('');
         setNewPatientPhone('');
         setSelectedDoctor('');
@@ -371,10 +374,8 @@ export function AppointmentsCalendar() {
         if (video && canvas) {
             const context = canvas.getContext('2d');
             if (context) {
-                // Flash effect
                 setShutterFlash(true);
                 setTimeout(() => setShutterFlash(false), 150);
-
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 context.drawImage(video, 0, 0);
@@ -407,8 +408,7 @@ export function AppointmentsCalendar() {
         setSelectedTime('');
     };
 
-    // Whether the patient section is filled enough to book
-    const patientReady = newPatientName.trim().length >= 2 && newPatientPhone.trim().length >= 6;
+    const patientReady = selectedPatientId || (newPatientName.trim().length >= 2 && newPatientPhone.trim().length >= 6);
 
     const handleSubmit = async () => {
         if (!patientReady || !selectedDoctor || !selectedDate || !selectedTime) {
@@ -418,23 +418,26 @@ export function AppointmentsCalendar() {
         setBookingError(null);
         setIsSubmitting(true);
         try {
-            let photoUrl = '';
-            if (photoFile) {
-                const uploadRes = await uploadFile.mutateAsync({ file: photoFile, folder: 'patients' });
-                photoUrl = uploadRes.fileUrl;
-            }
+            let patientId = selectedPatientId;
+            let finalPatientName = selectedPatientName;
+            let finalPatientEmail = patientEmail.trim();
 
-            // Always create patient directly — no existing patient search
-            const newPatRes = await api.post('/patients', {
-                name: newPatientName.trim(),
-                phone: newPatientPhone.trim(),
-                email: patientEmail.trim() || undefined,
-                photoUrl: photoUrl || undefined,
-            });
-            const created = newPatRes.data?.data || newPatRes.data;
-            const patientId = created._id;
-            const patientName = created.name;
-            const patientEmailFinal = patientEmail.trim();
+            if (!patientId) {
+                let photoUrl = '';
+                if (photoFile) {
+                    const uploadRes = await uploadFile.mutateAsync({ file: photoFile, folder: 'patients' });
+                    photoUrl = uploadRes.fileUrl;
+                }
+                const newPatRes = await api.post('/patients', {
+                    name: newPatientName.trim(),
+                    phone: newPatientPhone.trim(),
+                    email: finalPatientEmail || undefined,
+                    photoUrl: photoUrl || undefined,
+                });
+                const created = newPatRes.data?.data || newPatRes.data;
+                patientId = created._id;
+                finalPatientName = created.name;
+            }
 
             const [hours, minutes] = selectedTime.split(':');
             const startDateTime = new Date();
@@ -456,19 +459,17 @@ export function AppointmentsCalendar() {
             });
 
             setBookingSuccess({
-                patientName,
+                patientName: finalPatientName,
                 doctorName: selectedDoctorObj?.name || '',
                 date: selectedDate,
                 time: selectedTime,
                 type: appointmentType,
-                emailSent: !!patientEmailFinal,
-                patientEmail: patientEmailFinal,
+                emailSent: !!finalPatientEmail,
+                patientEmail: finalPatientEmail,
             });
-        } catch (error: unknown) {
-            const msg = error && typeof error === 'object' && 'response' in error
-                ? (error.response as { data?: { message?: string } })?.data?.message
-                : undefined;
-            setBookingError(msg || 'Failed to create appointment. Please try again.');
+        } catch (error: any) {
+            const msg = error.response?.data?.message || 'Failed to create appointment.';
+            setBookingError(msg);
         } finally {
             setIsSubmitting(false);
         }
@@ -495,7 +496,6 @@ export function AppointmentsCalendar() {
                     className="bg-blue-600 hover:bg-blue-700"
                     onClick={() => {
                         resetForm();
-                        // Pre-fill today's date so the form is immediately usable
                         setSelectedDate(format(new Date(), 'yyyy-MM-dd'));
                         setIsBookingDialogOpen(true);
                     }}
@@ -504,14 +504,11 @@ export function AppointmentsCalendar() {
                 </Button>
             }
         >
-            {/* ── BOOKING DIALOG ───────────────────────────────────────────── */}
             <Dialog open={isBookingDialogOpen} onOpenChange={(open) => {
                 if (!open) resetForm();
                 setIsBookingDialogOpen(open);
             }}>
                 <DialogContent aria-describedby={undefined} className="sm:max-w-[520px] max-h-[92vh] overflow-hidden p-0 gap-0 flex flex-col">
-
-                    {/* SUCCESS STATE */}
                     {bookingSuccess ? (
                         <div className="flex flex-col items-center text-center p-8 gap-4">
                             <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center">
@@ -521,8 +518,6 @@ export function AppointmentsCalendar() {
                                 <h2 className="text-xl font-bold text-gray-900">Appointment Confirmed!</h2>
                                 <p className="text-sm text-gray-500 mt-1">Your booking has been successfully created.</p>
                             </div>
-
-                            {/* Summary Card */}
                             <div className="w-full bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-5 text-left space-y-3">
                                 <div className="flex items-center gap-3">
                                     <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0">
@@ -553,49 +548,14 @@ export function AppointmentsCalendar() {
                                         </p>
                                     </div>
                                 </div>
-                                <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0">
-                                        <FileText className="h-4 w-4 text-white" />
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-blue-700 font-medium uppercase tracking-wide">Type</p>
-                                        <p className="font-semibold text-gray-900">{APPOINTMENT_TYPES[bookingSuccess.type] || bookingSuccess.type}</p>
-                                    </div>
-                                </div>
                             </div>
-
-                            {/* Email notice */}
-                            {bookingSuccess.emailSent && (
-                                <div className="w-full flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-lg p-4 text-left">
-                                    <Mail className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                                    <div>
-                                        <p className="text-sm font-medium text-blue-800">Confirmation email sent</p>
-                                        <p className="text-xs text-blue-600 mt-0.5">
-                                            A detailed confirmation has been sent to <span className="font-semibold">{bookingSuccess.patientEmail}</span>
-                                        </p>
-                                    </div>
-                                </div>
-                            )}
-
                             <div className="flex gap-3 w-full pt-2">
-                                <Button
-                                    variant="outline"
-                                    className="flex-1"
-                                    onClick={() => { resetForm(); }}
-                                >
-                                    Book Another
-                                </Button>
-                                <Button
-                                    className="flex-1 bg-blue-600 hover:bg-blue-700"
-                                    onClick={() => { setIsBookingDialogOpen(false); resetForm(); }}
-                                >
-                                    Done
-                                </Button>
+                                <Button variant="outline" className="flex-1" onClick={resetForm}>Book Another</Button>
+                                <Button className="flex-1 bg-blue-600 hover:bg-blue-700" onClick={() => setIsBookingDialogOpen(false)}>Done</Button>
                             </div>
                         </div>
                     ) : (
                         <>
-                            {/* DIALOG HEADER */}
                             <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-5 rounded-t-lg">
                                 <DialogHeader>
                                     <DialogTitle className="text-white text-lg font-bold flex items-center gap-2">
@@ -603,17 +563,12 @@ export function AppointmentsCalendar() {
                                         Book New Appointment
                                     </DialogTitle>
                                     <p className="text-blue-100 text-sm mt-1">
-                                        {selectedDate
-                                            ? `📅 ${format(new Date(selectedDate), 'EEEE, MMMM d, yyyy')}`
-                                            : 'Schedule a new patient visit'}
+                                        {selectedDate ? `📅 ${format(new Date(selectedDate), 'EEEE, MMMM d, yyyy')}` : 'Schedule a new patient visit'}
                                     </p>
                                 </DialogHeader>
                             </div>
 
-                            {/* FORM BODY — scrollable fields */}
                             <div className="px-6 py-5 space-y-5 overflow-y-auto flex-1">
-
-                                {/* Error Banner */}
                                 {bookingError && (
                                     <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg p-4">
                                         <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
@@ -624,536 +579,265 @@ export function AppointmentsCalendar() {
                                     </div>
                                 )}
 
-
-                                {/* ── PATIENT DETAILS ── */}
                                 <div className="space-y-3">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold">1</span>
-                                        <Label className="text-sm font-semibold text-gray-700">Patient Details <span className="text-red-500">*</span></Label>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div className="space-y-1">
-                                            <Label className="text-xs font-medium text-gray-700">Full Name <span className="text-red-500">*</span></Label>
-                                            <Input
-                                                placeholder="Patient full name"
-                                                value={newPatientName}
-                                                onChange={(e) => setNewPatientName(e.target.value)}
-                                                className="bg-gray-50 border-gray-200 focus:border-blue-400 text-sm"
-                                            />
+                                    <div className="flex items-center justify-between mb-2">
+                                        <div className="flex items-center gap-2">
+                                            <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold">1</span>
+                                            <Label className="text-sm font-semibold text-gray-700">Patient Details <span className="text-red-500">*</span></Label>
                                         </div>
-                                        <div className="space-y-1">
-                                            <Label className="text-xs font-medium text-gray-700">Phone <span className="text-red-500">*</span></Label>
-                                            <Input
-                                                placeholder="10-digit mobile number"
-                                                value={newPatientPhone}
-                                                onChange={(e) => setNewPatientPhone(e.target.value)}
-                                                className="bg-gray-50 border-gray-200 focus:border-blue-400 text-sm"
-                                            />
-                                        </div>
-                                    </div>
-                                    {/* Email */}
-                                    <div className="space-y-1">
-                                        <Label className="text-xs font-medium text-gray-700 flex items-center gap-1">
-                                            <Mail className="h-3 w-3 text-blue-600" />
-                                            Email <span className="font-normal text-gray-400">(optional — for confirmation)</span>
-                                        </Label>
-                                        <Input
-                                            type="email"
-                                            placeholder="patient@example.com"
-                                            value={patientEmail}
-                                            onChange={(e) => setPatientEmail(e.target.value)}
-                                            className="bg-gray-50 border-gray-200 focus:border-blue-400 focus:ring-blue-400 text-sm"
-                                        />
+                                        <Button 
+                                            variant="ghost" 
+                                            size="sm" 
+                                            className="text-xs text-blue-600 h-7 px-2 hover:bg-blue-50"
+                                            onClick={() => {
+                                                setIsExistingPatientMode(!isExistingPatientMode);
+                                                setSelectedPatientId(null);
+                                                setSelectedPatientName('');
+                                                setNewPatientName('');
+                                                setNewPatientPhone('');
+                                            }}
+                                        >
+                                            {isExistingPatientMode ? 'Enter New Patient' : 'Select Existing Patient'}
+                                        </Button>
                                     </div>
 
-                                    {/* PHOTO SECTION */}
-                                    <div className="space-y-2 pt-2">
-                                        <Label className="text-xs font-medium text-gray-700">Patient Photo</Label>
-                                        <div className="flex flex-col gap-3">
-                                            {photoPreview ? (
-                                                <div className="flex items-center gap-4">
-                                                    <div className="relative w-32 h-32 rounded-lg overflow-hidden border-2 border-blue-100 shadow-md">
-                                                        <img src={photoPreview} alt="Patient Preview" className="w-full h-full object-cover" />
-                                                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                                                            <CheckCircle2 className="text-white h-8 w-8" />
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex flex-col gap-2">
-                                                        <Button size="sm" variant="outline" type="button" className="text-xs h-8 border-blue-200 text-blue-700 hover:bg-blue-50" onClick={startCamera}>
-                                                            <Camera className="h-3 w-3 mr-1" /> Retake
-                                                        </Button>
-                                                        <Button size="sm" variant="ghost" type="button" className="text-xs h-8 text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => { setPhotoFile(null); setPhotoPreview(null); }}>
-                                                            <X className="h-3 w-3 mr-1" /> Remove
-                                                        </Button>
-                                                    </div>
-                                                </div>
-                                            ) : showCamera ? (
-                                                <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden border-2 border-blue-100 flex items-center justify-center">
-                                                    {/* Shutter Flash Effect */}
-                                                    {shutterFlash && <div className="absolute inset-0 bg-white z-50 animate-in fade-in duration-75" />}
-                                                    
-                                                    {isCameraInitializing && !troubleshootMode && (
-                                                        <div className="text-white flex flex-col items-center gap-2">
-                                                            <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
-                                                            <p className="text-sm font-medium">Connecting to camera...</p>
-                                                        </div>
-                                                    )}
+                                    {isExistingPatientMode ? (
+                                        <div className="space-y-3">
+                                            <div className="relative">
+                                                <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                                                <Input
+                                                    placeholder="Search patient by name or phone..."
+                                                    value={patientSearchQuery}
+                                                    onChange={(e) => setPatientSearchQuery(e.target.value)}
+                                                    className="pl-9 bg-gray-50 border-gray-200"
+                                                />
+                                                {isSearchingPatients && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-blue-600" />}
+                                            </div>
 
-                                                    {troubleshootMode ? (
-                                                        <div className="text-center p-6 bg-gray-900/90 w-full h-full flex flex-col items-center justify-center gap-4">
-                                                            <div className="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center">
-                                                                <CameraOff className="h-6 w-6 text-red-400" />
-                                                            </div>
-                                                            <div className="space-y-1">
-                                                                <p className="text-white font-semibold">Camera Blocked</p>
-                                                                <p className="text-xs text-gray-400 px-6">1. Check address bar icon to <b>Allow</b>.<br/>2. Open Settings &gt; Privacy &gt; Camera.</p>
-                                                            </div>
-                                                            <Button size="sm" variant="outline" className="text-xs bg-white/10 border-white/20 text-white hover:bg-white/20" onClick={() => { stopCamera(); setShowCamera(false); }}>
-                                                                Back to Upload
-                                                            </Button>
-                                                        </div>
-                                                    ) : (
-                                                        <>
-                                                            <video 
-                                                                ref={videoRef} 
-                                                                autoPlay 
-                                                                muted 
-                                                                playsInline 
-                                                                onLoadedMetadata={() => {
-                                                                    videoRef.current?.play().catch(console.error);
+                                            {patientSearchResults.length > 0 && !selectedPatientId && (
+                                                <Card className="border-blue-200 shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                                                    <div className="divide-y divide-gray-100">
+                                                        {patientSearchResults.map((p) => (
+                                                            <div 
+                                                                key={p._id} 
+                                                                className="p-3 hover:bg-blue-50 cursor-pointer flex items-center justify-between transition-colors"
+                                                                onClick={() => {
+                                                                    setSelectedPatientId(p._id);
+                                                                    setSelectedPatientName(p.name);
+                                                                    setPatientEmail(p.email || '');
+                                                                    setPatientSearchQuery('');
+                                                                    setPatientSearchResults([]);
                                                                 }}
-                                                                className={`w-full h-full object-cover ${isCameraInitializing ? 'hidden' : 'block'}`} 
-                                                            />
-                                                            <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-2 z-10">
-                                                                {!isCameraInitializing && stream && (
-                                                                    <>
-                                                                        <Button size="sm" type="button" onClick={takePhoto} className="bg-blue-600 hover:bg-blue-700 shadow-xl border-2 border-white/50 px-6 py-5 rounded-full scale-110">
-                                                                            <Camera className="h-5 w-5 mr-2" /> Take Photo
-                                                                        </Button>
-                                                                        {/* Fallback button if screen is black */}
-                                                                        <Button size="sm" variant="outline" type="button" onClick={() => videoRef.current?.play()} className="bg-black/40 text-white border-white/20 hover:bg-black/60 backdrop-blur-sm px-2 h-10 w-10 rounded-full" title="Fix black screen">
-                                                                            <Sparkles className="h-4 w-4" />
-                                                                        </Button>
-                                                                    </>
-                                                                )}
-                                                                <Button size="sm" type="button" variant="outline" onClick={() => { stopCamera(); setShowCamera(false); }} className="bg-white/90 hover:bg-white shadow-lg">
-                                                                    Cancel
-                                                                </Button>
+                                                            >
+                                                                <div>
+                                                                    <p className="text-sm font-semibold text-gray-900">{p.name}</p>
+                                                                    <p className="text-xs text-gray-500">{p.phone}</p>
+                                                                </div>
+                                                                <Badge variant="outline" className="text-[10px] bg-white">ID: PT-{p.patientId}</Badge>
                                                             </div>
-                                                        </>
-                                                    )}
-                                                </div>
-                                            ) : (
-                                                <div className="flex gap-2">
-                                                    <Button variant="outline" size="sm" onClick={startCamera} className="flex-1 border-dashed border-2 hover:border-blue-400 hover:bg-blue-50">
-                                                        <Camera className="h-4 w-4 mr-2 text-blue-600" /> Webcam
-                                                    </Button>
-                                                    <div className="relative flex-1">
-                                                        <input
-                                                            type="file"
-                                                            accept="image/*"
-                                                            className="hidden"
-                                                            id="photo-upload"
-                                                            onChange={(e) => {
-                                                                const file = e.target.files?.[0];
-                                                                if (file) {
-                                                                    setPhotoFile(file);
-                                                                    setPhotoPreview(URL.createObjectURL(file));
-                                                                }
-                                                            }}
-                                                        />
-                                                        <Button
-                                                            variant="outline"
-                                                            size="sm"
-                                                            className="w-full border-dashed border-2 hover:border-blue-400 hover:bg-blue-50"
-                                                            onClick={() => document.getElementById('photo-upload')?.click()}
-                                                        >
-                                                            <ImageIcon className="h-4 w-4 mr-2 text-blue-600" /> Upload
-                                                        </Button>
+                                                        ))}
                                                     </div>
+                                                </Card>
+                                            )}
+
+                                            {selectedPatientId && (
+                                                <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs">
+                                                            {selectedPatientName.charAt(0)}
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-semibold text-blue-900 text-sm">{selectedPatientName}</p>
+                                                            <p className="text-xs text-blue-600">Selected Patient</p>
+                                                        </div>
+                                                    </div>
+                                                    <Button variant="ghost" size="sm" onClick={() => setSelectedPatientId(null)} className="h-7 w-7 p-0 text-blue-400 hover:text-red-500">
+                                                        <X className="h-4 w-4" />
+                                                    </Button>
                                                 </div>
                                             )}
-                                            <canvas ref={canvasRef} className="hidden" />
                                         </div>
-                                    </div>
-                                </div>
-
-
-                                {/* ── DOCTOR ── */}
-                                <div className="space-y-2">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold">2</span>
-                                        <Label className="text-sm font-semibold text-gray-700">Select Doctor <span className="text-red-500">*</span></Label>
-                                    </div>
-                                    <Select value={selectedDoctor} onValueChange={handleDoctorChange}>
-                                        <SelectTrigger className="bg-gray-50 border-gray-200 focus:border-blue-400">
-                                            <SelectValue placeholder="Choose a doctor..." />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {doctors.map((doctor) => (
-                                                <SelectItem key={doctor._id} value={doctor._id}>
-                                                    <div className="flex items-center gap-2">
-                                                        <Stethoscope className="h-3.5 w-3.5 text-blue-600" />
-                                                        <span>{doctor.name}</span>
-                                                        {doctor.doctorProfile?.specialization && (
-                                                            <span className="text-xs text-gray-400">— {doctor.doctorProfile.specialization}</span>
-                                                        )}
-                                                    </div>
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-
-                                    {/* Doctor card on selection */}
-                                    {selectedDoctorObj && (
-                                        <div className="flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3">
-                                            <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                                                {selectedDoctorObj.name.charAt(0).toUpperCase()}
-                                            </div>
-                                            <div>
-                                                <p className="font-semibold text-gray-900 text-sm">{selectedDoctorObj.name}</p>
-                                                <p className="text-xs text-indigo-600">
-                                                    {selectedDoctorObj.doctorProfile?.specialization || 'General Dentist'}
-                                                </p>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* ── CHAIR ── */}
-                                <div className="space-y-2">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold">3</span>
-                                        <Label className="text-sm font-semibold text-gray-700">Dental Chair <span className="text-gray-400 font-normal text-xs">(optional)</span></Label>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        {CLINIC_CHAIRS.map((chair) => (
-                                            <button
-                                                key={chair.id}
-                                                type="button"
-                                                onClick={() => setSelectedChair(c => c === chair.id ? '' : chair.id)}
-                                                className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg border text-sm font-medium transition-all ${
-                                                    selectedChair === chair.id
-                                                        ? 'border-transparent shadow-md scale-[1.02]'
-                                                        : 'border-gray-200 bg-gray-50 hover:border-gray-300'
-                                                }`}
-                                                style={selectedChair === chair.id ? { backgroundColor: chair.light, borderColor: chair.color, color: chair.color } : {}}
-                                            >
-                                                <span
-                                                    className="w-3 h-3 rounded-full flex-shrink-0"
-                                                    style={{ backgroundColor: chair.color }}
-                                                />
-                                                <span className="truncate text-xs">{chair.name}</span>
-                                                {selectedChair === chair.id && (
-                                                    <span className="ml-auto text-xs font-bold">✓</span>
-                                                )}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    {selectedChair && (
-                                        <p className="text-xs text-gray-400">
-                                            Selected: <span className="font-medium text-gray-600">{CLINIC_CHAIRS.find(c => c.id === selectedChair)?.name}</span>
-                                            {' — '}<button type="button" onClick={() => setSelectedChair('')} className="text-red-400 hover:text-red-600">Clear</button>
-                                        </p>
-                                    )}
-                                </div>
-
-                                {/* ── DATE ── */}
-                                <div className="space-y-2">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold">4</span>
-                                        <Label className="text-sm font-semibold text-gray-700">Date <span className="text-red-500">*</span></Label>
-                                    </div>
-                                    <Input
-                                        type="date"
-                                        value={selectedDate || ''}
-                                        onChange={(e) => { setSelectedDate(e.target.value); setSelectedTime(''); }}
-                                        min={format(new Date(), 'yyyy-MM-dd')}
-                                        className="bg-gray-50 border-gray-200 focus:border-blue-400"
-                                    />
-                                </div>
-
-                                {/* ── TIME SLOTS ── */}
-                                {selectedDoctor && selectedDate && (
-                                    <div className="space-y-2">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold">5</span>
-                                            <Label className="text-sm font-semibold text-gray-700">Time Slot <span className="text-red-500">*</span></Label>
-                                        </div>
-                                        {availableSlots.length > 0 ? (
-                                            <div className="flex flex-wrap gap-2">
-                                                {availableSlots.map((slot) => (
-                                                    <button
-                                                        key={slot}
-                                                        type="button"
-                                                        onClick={() => setSelectedTime(slot)}
-                                                        className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-all ${selectedTime === slot
-                                                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm scale-105'
-                                                            : 'bg-white text-gray-700 border-gray-200 hover:border-blue-400 hover:text-blue-600'
-                                                            }`}
-                                                    >
-                                                        <Clock className={`h-3 w-3 inline mr-1 ${selectedTime === slot ? 'text-white' : 'text-gray-400'}`} />
-                                                        {slot}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        ) : (
-                                            <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 flex items-center gap-2">
-                                                <AlertCircle className="h-4 w-4 text-orange-500 flex-shrink-0" />
-                                                <p className="text-sm text-orange-700">No available slots for this date. Please choose another day.</p>
-                                            </div>
-                                        )}
-                                        {bookedSlots.length > 0 && (
-                                            <p className="text-xs text-gray-400 flex items-center gap-1 mt-1">
-                                                <span className="inline-block w-2 h-2 rounded-full bg-gray-300"></span>
-                                                Already booked: {bookedSlots.join(', ')}
-                                            </p>
-                                        )}
-                                    </div>
-                                )}
-
-                                {/* ── APPOINTMENT TYPE ── */}
-                                <div className="space-y-2">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold">5</span>
-                                        <Label className="text-sm font-semibold text-gray-700">Appointment Type</Label>
-                                    </div>
-                                    <Select value={appointmentType} onValueChange={setAppointmentType}>
-                                        <SelectTrigger className="bg-gray-50 border-gray-200">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {Object.entries(APPOINTMENT_TYPES).map(([value, label]) => (
-                                                <SelectItem key={value} value={value}>{label}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-
-                                {/* ── CHIEF COMPLAINT & NOTES ── */}
-                                <div className="space-y-3">
-                                    <div className="space-y-1.5">
-                                        <Label className="text-sm font-medium text-gray-700">Chief Complaint</Label>
-                                        <Textarea
-                                            placeholder="Reason for visit (e.g. toothache, routine cleaning…)"
-                                            value={chiefComplaint}
-                                            onChange={(e) => setChiefComplaint(e.target.value)}
-                                            rows={2}
-                                            className="bg-gray-50 border-gray-200 resize-none text-sm"
-                                        />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <Label className="text-sm font-medium text-gray-700">Additional Notes</Label>
-                                        <Textarea
-                                            placeholder="Internal notes for staff…"
-                                            value={notes}
-                                            onChange={(e) => setNotes(e.target.value)}
-                                            rows={2}
-                                            className="bg-gray-50 border-gray-200 resize-none text-sm"
-                                        />
-                                    </div>
-                                </div>
-
-                            </div>
-
-                            {/* ── STICKY FOOTER — always visible ── */}
-                            <div className="px-6 py-4 border-t border-gray-100 bg-white flex-shrink-0">
-                                <Button
-                                    type="button"
-                                    className="w-full bg-blue-600 hover:bg-blue-700 text-base py-5 font-semibold shadow-sm"
-                                    onClick={handleSubmit}
-                                    disabled={isSubmitting || !patientReady || !selectedDoctor || !selectedDate || !selectedTime}
-                                >
-                                    {isSubmitting ? (
-                                        <>
-                                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                                            Booking Appointment…
-                                        </>
                                     ) : (
                                         <>
-                                            <CheckCircle2 className="mr-2 h-5 w-5" />
-                                            Confirm Appointment
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="space-y-1">
+                                                    <Label className="text-xs font-medium text-gray-700">Full Name <span className="text-red-500">*</span></Label>
+                                                    <Input
+                                                        placeholder="Patient full name"
+                                                        value={newPatientName}
+                                                        onChange={(e) => setNewPatientName(e.target.value)}
+                                                        className="bg-gray-50 border-gray-200"
+                                                    />
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <Label className="text-xs font-medium text-gray-700">Phone <span className="text-red-500">*</span></Label>
+                                                    <Input
+                                                        placeholder="Mobile number"
+                                                        value={newPatientPhone}
+                                                        onChange={(e) => setNewPatientPhone(e.target.value)}
+                                                        className="bg-gray-50 border-gray-200"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label className="text-xs font-medium text-gray-700">Email (optional)</Label>
+                                                <Input
+                                                    type="email"
+                                                    placeholder="patient@example.com"
+                                                    value={patientEmail}
+                                                    onChange={(e) => setPatientEmail(e.target.value)}
+                                                    className="bg-gray-50 border-gray-200"
+                                                />
+                                            </div>
+                                            <div className="space-y-2 pt-2">
+                                                <Label className="text-xs font-medium text-gray-700">Patient Photo</Label>
+                                                <div className="flex flex-col gap-3">
+                                                    {photoPreview ? (
+                                                        <div className="flex items-center gap-4">
+                                                            <div className="relative w-24 h-24 rounded-lg overflow-hidden border-2 border-blue-100 shadow-md">
+                                                                <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
+                                                            </div>
+                                                            <div className="flex flex-col gap-2">
+                                                                <Button size="sm" variant="outline" onClick={startCamera} className="text-xs h-8">Retake</Button>
+                                                                <Button size="sm" variant="ghost" onClick={() => { setPhotoFile(null); setPhotoPreview(null); }} className="text-xs h-8 text-red-500">Remove</Button>
+                                                            </div>
+                                                        </div>
+                                                    ) : showCamera ? (
+                                                        <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
+                                                            {shutterFlash && <div className="absolute inset-0 bg-white z-50 animate-in fade-in duration-75" />}
+                                                            {isCameraInitializing && (
+                                                                <div className="absolute inset-0 flex flex-col items-center justify-center text-white gap-2">
+                                                                    <Loader2 className="h-6 w-6 animate-spin" />
+                                                                    <p className="text-xs">Initializing...</p>
+                                                                </div>
+                                                            )}
+                                                            <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+                                                            <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-2">
+                                                                <Button size="sm" onClick={takePhoto} className="bg-blue-600 rounded-full h-10 w-10 p-0"><Camera className="h-5 w-5" /></Button>
+                                                                <Button size="sm" variant="outline" onClick={() => { stopCamera(); setShowCamera(false); }} className="bg-white/90">Cancel</Button>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex gap-2">
+                                                            <Button variant="outline" size="sm" onClick={startCamera} className="flex-1 border-dashed border-2"><Camera className="h-4 w-4 mr-2" /> Webcam</Button>
+                                                            <input type="file" accept="image/*" className="hidden" id="photo-upload" onChange={(e) => {
+                                                                const file = e.target.files?.[0];
+                                                                if (file) { setPhotoFile(file); setPhotoPreview(URL.createObjectURL(file)); }
+                                                            }} />
+                                                            <Button variant="outline" size="sm" onClick={() => document.getElementById('photo-upload')?.click()} className="flex-1 border-dashed border-2"><ImageIcon className="h-4 w-4 mr-2" /> Upload</Button>
+                                                        </div>
+                                                    )}
+                                                    <canvas ref={canvasRef} className="hidden" />
+                                                </div>
+                                            </div>
                                         </>
                                     )}
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label className="text-sm font-semibold text-gray-700">Select Doctor <span className="text-red-500">*</span></Label>
+                                    <Select value={selectedDoctor} onValueChange={handleDoctorChange}>
+                                        <SelectTrigger className="bg-gray-50 border-gray-200"><SelectValue placeholder="Choose a doctor..." /></SelectTrigger>
+                                        <SelectContent>
+                                            {doctors.map((doctor) => (
+                                                <SelectItem key={doctor._id} value={doctor._id}>{doctor.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label className="text-sm font-semibold text-gray-700">Date <span className="text-red-500">*</span></Label>
+                                        <Input type="date" value={selectedDate || ''} onChange={(e) => setSelectedDate(e.target.value)} min={format(new Date(), 'yyyy-MM-dd')} className="bg-gray-50 border-gray-200" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label className="text-sm font-semibold text-gray-700">Time <span className="text-red-500">*</span></Label>
+                                        <Select value={selectedTime} onValueChange={setSelectedTime}>
+                                            <SelectTrigger className="bg-gray-50 border-gray-200"><SelectValue placeholder="Select Time" /></SelectTrigger>
+                                            <SelectContent>
+                                                {availableSlots.map(slot => <SelectItem key={slot} value={slot}>{slot}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label className="text-sm font-semibold text-gray-700">Appointment Type</Label>
+                                    <Select value={appointmentType} onValueChange={setAppointmentType}>
+                                        <SelectTrigger className="bg-gray-50 border-gray-200"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            {Object.entries(APPOINTMENT_TYPES).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+
+                            <div className="px-6 py-4 border-t border-gray-100 bg-white">
+                                <Button className="w-full bg-blue-600 hover:bg-blue-700 h-11 text-base font-bold" onClick={handleSubmit} disabled={isSubmitting || !patientReady || !selectedDoctor || !selectedDate || !selectedTime}>
+                                    {isSubmitting ? <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Booking...</> : <><CheckCircle2 className="mr-2 h-5 w-5" /> Confirm Appointment</>}
                                 </Button>
-                                {(!patientReady || !selectedDoctor || !selectedDate || !selectedTime) && (
-                                    <p className="text-xs text-center text-gray-400 mt-2">
-                                        {!patientReady
-                                            ? '⬆ Enter patient name and phone to continue'
-                                            : !selectedDoctor ? '⬆ Choose a doctor'
-                                                : !selectedDate ? '⬆ Pick a date'
-                                                    : '⬆ Select a time slot'}
-                                    </p>
-                                )}
                             </div>
                         </>
                     )}
                 </DialogContent>
             </Dialog>
 
-            {/* ── CALENDAR ─────────────────────────────────────────────────── */}
-            <Card>
-                <CardContent className="p-6">
-                    <div className="h-[700px]">
-                        <Calendar
-                            localizer={localizer}
-                            events={events}
-                            startAccessor="start"
-                            endAccessor="end"
-                            view={view}
-                            onView={(newView) => setView(newView)}
-                            date={date}
-                            onNavigate={(newDate) => setDate(newDate)}
-                            onSelectSlot={handleSelectSlot}
-                            onSelectEvent={handleSelectEvent}
-                            selectable
-                            style={{ height: '100%', fontFamily: 'inherit' }}
-                            views={['month', 'week', 'day', 'agenda']}
-                            min={new Date(0, 0, 0, 8, 0, 0)}
-                            max={new Date(0, 0, 0, 20, 0, 0)}
-                            className="bg-white rounded-md"
-                            eventPropGetter={(event: CalendarEvent) => {
-                                // Color by chair first; fall back to status color
-                                const chair = CLINIC_CHAIRS.find(c => c.id === event.chairId);
-                                let backgroundColor = chair ? chair.color : '#0f766e';
-                                if (!chair) {
-                                    if (event.status === 'COMPLETED') backgroundColor = '#22c55e';
-                                    else if (event.status === 'CANCELLED') backgroundColor = '#ef4444';
-                                    else if (event.status === 'NO_SHOW') backgroundColor = '#f59e0b';
-                                    else if (event.status === 'IN_PROGRESS') backgroundColor = '#3b82f6';
-                                    else if (event.status === 'CONFIRMED') backgroundColor = '#9333ea';
-                                    else if (event.status === 'RESCHEDULED') backgroundColor = '#f97316';
-                                }
-                                return { style: { backgroundColor, border: 'none', borderRadius: '6px' } };
-                            }}
-                        />
-                    </div>
+            <Card><CardContent className="p-6">
+                <div className="h-[700px]">
+                    <Calendar
+                        localizer={localizer}
+                        events={events}
+                        startAccessor="start"
+                        endAccessor="end"
+                        view={view}
+                        onView={(newView) => setView(newView)}
+                        date={date}
+                        onNavigate={(newDate) => setDate(newDate)}
+                        onSelectSlot={handleSelectSlot}
+                        onSelectEvent={handleSelectEvent}
+                        selectable
+                        style={{ height: '100%' }}
+                        eventPropGetter={(event: any) => {
+                            const chair = CLINIC_CHAIRS.find(c => c.id === event.chairId);
+                            let backgroundColor = chair ? chair.color : '#3b82f6';
+                            return { style: { backgroundColor, border: 'none', borderRadius: '4px' } };
+                        }}
+                    />
+                </div>
+            </CardContent></Card>
 
-                    {/* Chair legend */}
-                    <div className="mt-4 flex flex-wrap gap-3 pt-3 border-t border-gray-100">
-                        <span className="text-xs font-medium text-gray-500 self-center">Chair colors:</span>
-                        {CLINIC_CHAIRS.map(chair => (
-                            <div key={chair.id} className="flex items-center gap-1.5">
-                                <span className="w-3 h-3 rounded-full" style={{ backgroundColor: chair.color }} />
-                                <span className="text-xs text-gray-600">{chair.name.replace('Chair ', 'Ch.')}</span>
-                            </div>
-                        ))}
-                        <div className="flex items-center gap-1.5 ml-2 pl-2 border-l border-gray-200">
-                            <span className="w-3 h-3 rounded-full bg-blue-600" />
-                            <span className="text-xs text-gray-600">No chair</span>
-                        </div>
-                    </div>
-                </CardContent>
-            </Card>
-
-            {/* ── APPOINTMENT DETAIL DIALOG ────────────────────────────────── */}
             <Dialog open={isDetailDialogOpen} onOpenChange={setIsDetailDialogOpen}>
-                <DialogContent className="sm:max-w-[450px] p-0 gap-0">
+                <DialogContent className="sm:max-w-[450px] p-0 overflow-hidden">
                     {selectedAppointment && (
-                        <>
-                            {/* Header */}
-                            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-5 rounded-t-lg">
-                                <DialogHeader>
-                                    <DialogTitle className="text-white font-bold flex items-center gap-2">
-                                        <CalendarIcon className="h-5 w-5" />
-                                        Appointment Details
-                                    </DialogTitle>
-                                    <p className="text-blue-100 text-sm mt-1">
-                                        {format(new Date(selectedAppointment.date), 'EEEE, MMMM d, yyyy')}
-                                    </p>
-                                </DialogHeader>
+                        <div className="flex flex-col">
+                            <div className="bg-blue-600 p-6 text-white">
+                                <h2 className="text-xl font-bold">{selectedAppointment.patientId.name}</h2>
+                                <p className="text-blue-100">{format(new Date(selectedAppointment.date), 'PPPP')}</p>
                             </div>
-
-                            <div className="px-6 py-5 space-y-4">
-                                {/* Status */}
-                                <div className="flex justify-center">
-                                    <span className={`px-4 py-1.5 rounded-full text-sm font-semibold border ${getStatusBadgeColor(selectedAppointment.status)}`}>
-                                        {selectedAppointment.status.replace(/_/g, ' ')}
-                                    </span>
-                                </div>
-
-                                {/* Patient card */}
-                                <div className="bg-gray-50 rounded-xl p-4 space-y-2.5">
-                                    <div className="flex items-center gap-3">
-                                        {selectedAppointment.patientId.photoUrl ? (
-                                            <img 
-                                                src={selectedAppointment.patientId.photoUrl} 
-                                                alt={selectedAppointment.patientId.name} 
-                                                className="w-12 h-12 rounded-full object-cover border-2 border-white shadow-sm shrink-0"
-                                            />
-                                        ) : (
-                                            <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-lg shadow-sm border-2 border-white shrink-0">
-                                                {selectedAppointment.patientId.name.charAt(0)}
-                                            </div>
-                                        )}
-                                        <div>
-                                            <p className="font-semibold text-gray-900">{selectedAppointment.patientId.name}</p>
-                                            <p className="text-xs text-gray-500">Patient</p>
-                                        </div>
+                            <div className="p-6 space-y-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 font-bold">{selectedAppointment.patientId.name.charAt(0)}</div>
+                                    <div>
+                                        <p className="font-semibold">{selectedAppointment.patientId.name}</p>
+                                        <p className="text-sm text-gray-500">{selectedAppointment.patientId.phone}</p>
                                     </div>
-                                    {selectedAppointment.patientId.phone && (
-                                        <div className="flex items-center gap-2 text-sm text-gray-600 pl-1">
-                                            <Phone className="h-3.5 w-3.5 text-blue-600" />
-                                            {selectedAppointment.patientId.phone}
-                                        </div>
-                                    )}
-                                    {selectedAppointment.patientId.email && (
-                                        <div className="flex items-center gap-2 text-sm text-gray-600 pl-1">
-                                            <Mail className="h-3.5 w-3.5 text-blue-600" />
-                                            {selectedAppointment.patientId.email}
-                                        </div>
-                                    )}
                                 </div>
-
-                                {/* Appointment info */}
-                                <div className="space-y-3">
-                                    {[
-                                        { icon: <Stethoscope className="h-4 w-4 text-blue-600" />, label: 'Doctor', value: `Dr. ${selectedAppointment.doctorId.name}` },
-                                        { icon: <Clock className="h-4 w-4 text-blue-600" />, label: 'Time', value: `${selectedAppointment.startTime} – ${selectedAppointment.endTime}` },
-                                        { icon: <FileText className="h-4 w-4 text-blue-600" />, label: 'Type', value: selectedAppointment.type.replace(/_/g, ' ') },
-                                    ].map(({ icon, label, value }) => (
-                                        <div key={label} className="flex items-center gap-3">
-                                            <div className="w-7 h-7 rounded-full bg-teal-50 flex items-center justify-center flex-shrink-0">{icon}</div>
-                                            <div>
-                                                <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">{label}</p>
-                                                <p className="text-sm font-semibold text-gray-900">{value}</p>
-                                            </div>
-                                        </div>
-                                    ))}
-                                    {selectedAppointment.tokenNumber && (
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-7 h-7 rounded-full bg-blue-50 flex items-center justify-center flex-shrink-0">
-                                                <span className="text-xs font-bold text-blue-600">#</span>
-                                            </div>
-                                            <div>
-                                                <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">Token</p>
-                                                <span className="px-2.5 py-0.5 bg-blue-600 text-white rounded-full text-sm font-bold">
-                                                    {selectedAppointment.tokenNumber}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    )}
+                                <div className="grid grid-cols-2 gap-4 pt-2">
+                                    <div><p className="text-xs text-gray-400 uppercase">Doctor</p><p className="font-medium text-sm">Dr. {selectedAppointment.doctorId.name}</p></div>
+                                    <div><p className="text-xs text-gray-400 uppercase">Time</p><p className="font-medium text-sm">{selectedAppointment.startTime} - {selectedAppointment.endTime}</p></div>
+                                    <div><p className="text-xs text-gray-400 uppercase">Type</p><p className="font-medium text-sm">{selectedAppointment.type}</p></div>
+                                    <div><p className="text-xs text-gray-400 uppercase">Status</p><p className="font-medium text-sm">{selectedAppointment.status}</p></div>
                                 </div>
-
-                                {/* Chief complaint / notes */}
                                 {selectedAppointment.chiefComplaint && (
-                                    <div className="space-y-1">
-                                        <Label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Chief Complaint</Label>
-                                        <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg">{selectedAppointment.chiefComplaint}</p>
+                                    <div className="pt-2">
+                                        <p className="text-xs text-gray-400 uppercase">Chief Complaint</p>
+                                        <p className="text-sm bg-gray-50 p-3 rounded-lg mt-1">{selectedAppointment.chiefComplaint}</p>
                                     </div>
                                 )}
-                                {selectedAppointment.notes && (
-                                    <div className="space-y-1">
-                                        <Label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Notes</Label>
-                                        <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg">{selectedAppointment.notes}</p>
-                                    </div>
-                                )}
-
-                                <Button variant="outline" className="w-full" onClick={() => setIsDetailDialogOpen(false)}>
-                                    Close
-                                </Button>
+                                <Button variant="outline" className="w-full mt-4" onClick={() => setIsDetailDialogOpen(false)}>Close</Button>
                             </div>
-                        </>
+                        </div>
                     )}
                 </DialogContent>
             </Dialog>

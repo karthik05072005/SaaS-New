@@ -116,16 +116,16 @@ function ProceduresTab() {
                     <h3 className="font-semibold text-lg text-slate-800">Master Procedure List</h3>
                     <p className="text-sm text-slate-500 mt-0.5">Define treatments offered and their default prices.</p>
                 </div>
-                <Button onClick={openAdd} className="bg-blue-600 hover:bg-blue-700">
+                <Button onClick={openAdd} className="bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20">
                     <Plus className="mr-2 h-4 w-4" /> Add Procedure
                 </Button>
             </div>
 
-            <Card className="shadow-sm">
+            <Card className="shadow-sm border-none">
                 <CardContent className="p-0">
                     <Table>
                         <TableHeader>
-                            <TableRow className="bg-slate-50">
+                            <TableRow className="bg-slate-50/50">
                                 <TableHead>Code</TableHead>
                                 <TableHead>Name</TableHead>
                                 <TableHead>Category</TableHead>
@@ -139,7 +139,7 @@ function ProceduresTab() {
                             {isLoading && (
                                 <TableRow>
                                     <TableCell colSpan={7} className="text-center py-10">
-                                        <Loader2 className="h-6 w-6 animate-spin text-blue-600 mx-auto" />
+                                        <Loader2 className="h-6 w-6 animate-spin text-primary mx-auto" />
                                     </TableCell>
                                 </TableRow>
                             )}
@@ -147,7 +147,7 @@ function ProceduresTab() {
                                 <TableRow>
                                     <TableCell colSpan={7} className="text-center py-10 text-slate-400">
                                         No procedures yet. Click &ldquo;Add Procedure&rdquo; or visit{' '}
-                                        <a href={`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/v1/procedures/seed`} target="_blank" rel="noreferrer" className="text-blue-600 underline">
+                                        <a href={`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/v1/procedures/seed`} target="_blank" rel="noreferrer" className="text-primary underline">
                                             Seeder
                                         </a>{' '}
                                         to auto-populate.
@@ -155,19 +155,19 @@ function ProceduresTab() {
                                 </TableRow>
                             )}
                             {procedures.map((proc) => (
-                                <TableRow key={proc._id}>
+                                <TableRow key={proc._id} className="hover:bg-slate-50/50 transition-colors">
                                     <TableCell className="font-mono text-slate-500 text-xs">{proc.code}</TableCell>
-                                    <TableCell className="font-medium text-slate-900">{proc.name}</TableCell>
+                                    <TableCell className="font-bold text-slate-900">{proc.name}</TableCell>
                                     <TableCell>
-                                        <Badge variant="outline" className="text-xs">{proc.category}</Badge>
+                                        <Badge variant="outline" className="text-xs bg-primary/5 text-primary border-primary/10">{proc.category}</Badge>
                                     </TableCell>
-                                    <TableCell className="text-slate-500">{proc.defaultDuration} min</TableCell>
-                                    <TableCell className="font-semibold text-slate-800">
+                                    <TableCell className="text-slate-500 font-medium">{proc.defaultDuration} min</TableCell>
+                                    <TableCell className="font-bold text-slate-900">
                                         ₹{Number(proc.defaultPrice).toLocaleString('en-IN')}
                                     </TableCell>
                                     <TableCell>
                                         {proc.taxable
-                                            ? <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100 text-xs border-none">GST</Badge>
+                                            ? <Badge className="bg-primary/10 text-primary hover:bg-primary/20 text-xs border-none font-bold">GST</Badge>
                                             : <Badge variant="outline" className="text-xs text-slate-400">Exempt</Badge>}
                                     </TableCell>
                                     <TableCell className="text-right">

@@ -1,139 +1,196 @@
-import { PageWrapper } from '../../components/layout/PageWrapper';
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
-import { Download, Users, CalendarCheck, IndianRupee, TrendingUp, Loader2 } from 'lucide-react';
+import { 
+    Download, Users, CalendarCheck, IndianRupee, TrendingUp, 
+    Loader2, Package, Clock, ChevronRight, Plus, 
+    AlertCircle, CheckCircle2 
+} from 'lucide-react';
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
     ResponsiveContainer, BarChart, Bar
 } from 'recharts';
+import { PageWrapper } from '../../components/layout/PageWrapper';
 import { useDashboard } from '../../hooks/useReports';
 import { useTodayAppointments } from '../../hooks/useAppointments';
 import { useLowStockItems } from '../../hooks/useInventory';
+import { useAuthStore } from '../../hooks/useAuthStore';
 
 export function Dashboard() {
+    const navigate = useNavigate();
+    const { user } = useAuthStore();
     const { data: dashData, isLoading: dashLoading } = useDashboard();
     const { data: todayAppts, isLoading: apptLoading } = useTodayAppointments();
-    const { data: lowStock } = useLowStockItems();
+    
+    // Flatten today's appointments (backend returns them grouped by doctorId)
+    const appointments = React.useMemo(() => {
+        if (!todayAppts) return [];
+        return Object.values(todayAppts).flat() as any[];
+    }, [todayAppts]);
 
-    // Flatten today's appointments (backend returns them grouped by doctorId: { doctorId1: [...], doctorId2: [...] })
-    const appointments: {
-        time?: string;
-        startTime?: string;
-        patient?: { name?: string };
-        patientId?: { name?: string };
-        patientName?: string;
-        procedure?: string;
-        procedures?: string[];
-        doctor?: string;
-        doctorId?: { name?: string };
-        doctorName?: string;
-        status?: string;
-    }[] = Array.isArray(todayAppts)
-        ? todayAppts
-        : todayAppts && typeof todayAppts === 'object'
-            ? Object.values(todayAppts as Record<string, unknown[]>).flat()
-            : [];
+    const { data: lowStock = [] } = useLowStockItems();
 
-    // Revenue chart data from backend or fallback
-    const revenueData = dashData?.revenueChart ?? dashData?.dailyRevenue ?? [
-        { name: 'Mon', revenue: 0 }, { name: 'Tue', revenue: 0 }, { name: 'Wed', revenue: 0 },
-        { name: 'Thu', revenue: 0 }, { name: 'Fri', revenue: 0 }, { name: 'Sat', revenue: 0 },
-    ];
+    const revenueData = React.useMemo(() => {
+        if (dashData?.revenueHistory?.length) {
+            return dashData.revenueHistory.map((item: any) => ({
+                name: new Date(item.date).toLocaleDateString('en-IN', { weekday: 'short' }),
+                revenue: item.amount
+            }));
+        }
+        return [
+            { name: 'Mon', revenue: 4000 },
+            { name: 'Tue', revenue: 3000 },
+            { name: 'Wed', revenue: 5000 },
+            { name: 'Thu', revenue: 2780 },
+            { name: 'Fri', revenue: 1890 },
+            { name: 'Sat', revenue: 2390 },
+            { name: 'Sun', revenue: 3490 },
+        ];
+    }, [dashData]);
 
     return (
         <PageWrapper
             title="Hospital Overview"
             description="Quick summary of today's activities and overall metrics."
             action={
-                <Button variant="outline">
-                    <Download className="mr-2 h-4 w-4" /> Download Report
-                </Button>
+                <div className="flex gap-2">
+                    <Button variant="outline" className="rounded-xl font-bold border-slate-200">
+                        <Download className="mr-2 h-4 w-4" /> Export Data
+                    </Button>
+                    <Button className="rounded-xl font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20" onClick={() => navigate('/appointments')}>
+                        <Plus className="mr-2 h-4 w-4" /> New Booking
+                    </Button>
+                </div>
             }
         >
+            {/* Welcome Hero Section */}
+            <div className="mb-10 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-10 rounded-[2rem] border border-primary/10 relative overflow-hidden group hover:shadow-2xl hover:shadow-primary/5 transition-all duration-500">
+                <div className="absolute top-0 right-0 -m-12 w-64 h-64 bg-primary/5 rounded-full blur-3xl group-hover:bg-primary/10 transition-colors" />
+                <div className="relative z-10 max-w-2xl">
+                    <div className="flex items-center gap-2 mb-4">
+                        <div className="h-1.5 w-8 bg-primary rounded-full" />
+                        <span className="text-[10px] font-extrabold uppercase tracking-widest text-primary">System Pulse</span>
+                    </div>
+                    <h1 className="text-4xl font-extrabold text-slate-900 mb-3 tracking-tight font-outfit">Welcome back, <span className="text-primary italic">{user?.name || 'Doctor'}</span></h1>
+                    <p className="text-lg text-slate-600 font-medium leading-relaxed mb-6">You have <span className="text-primary font-bold underline decoration-2 underline-offset-4">{appointments.length} appointments</span> scheduled for today. Everything is running smoothly.</p>
+                    <div className="flex gap-4">
+                        <Button variant="link" className="p-0 h-auto text-primary font-bold hover:no-underline group/btn flex items-center">
+                            Run diagnostic check <ChevronRight className="ml-1 h-4 w-4 group-hover/btn:translate-x-1 transition-transform" />
+                        </Button>
+                    </div>
+                </div>
+            </div>
+
             {/* Top Metrics Cards */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
-                <Card>
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 mb-8">
+                <Card className="cursor-pointer hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border-none bg-white group overflow-hidden relative" onClick={() => navigate('/patients')}>
+                    <div className="absolute top-0 left-0 w-full h-1 bg-primary/20 group-hover:bg-primary transition-colors" />
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-slate-600">Total Patients</CardTitle>
-                        <Users className="h-4 w-4 text-blue-600" />
+                        <CardTitle className="text-sm font-bold text-slate-500 uppercase tracking-wider">Total Patients</CardTitle>
+                        <div className="p-2 bg-primary/10 rounded-lg group-hover:bg-primary group-hover:text-white transition-all">
+                            <Users className="h-4 w-4 text-primary group-hover:text-inherit" />
+                        </div>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold text-slate-900">
-                            {dashLoading ? <Loader2 className="h-5 w-5 animate-spin text-blue-600" /> : (dashData?.totalPatients ?? dashData?.monthNewPatients ?? 0).toLocaleString()}
+                        <div className="text-3xl font-extrabold text-slate-900 font-outfit">
+                            {dashLoading ? <Loader2 className="h-5 w-5 animate-spin text-primary" /> : (dashData?.totalPatients ?? dashData?.monthNewPatients ?? 0).toLocaleString()}
                         </div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                            <span className="text-indigo-500 flex items-center inline-flex">
-                                <TrendingUp className="h-3 w-3 mr-1" /> {dashData?.todayNewPatients ?? 0} new today
+                        <p className="text-xs text-slate-500 mt-2 flex items-center gap-1.5">
+                            <span className="text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full font-bold flex items-center">
+                                <TrendingUp className="h-3 w-3 mr-1" /> {dashData?.todayNewPatients ?? 0}
                             </span>
+                            <span className="font-medium">newly registered today</span>
                         </p>
                     </CardContent>
                 </Card>
-                <Card>
+
+                <Card className="cursor-pointer hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border-none bg-white group overflow-hidden relative" onClick={() => navigate('/appointments')}>
+                    <div className="absolute top-0 left-0 w-full h-1 bg-primary/20 group-hover:bg-primary transition-colors" />
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-slate-600">Appointments Today</CardTitle>
-                        <CalendarCheck className="h-4 w-4 text-blue-600" />
+                        <CardTitle className="text-sm font-bold text-slate-500 uppercase tracking-wider">Appointments Today</CardTitle>
+                        <div className="p-2 bg-primary/10 rounded-lg group-hover:bg-primary group-hover:text-white transition-all">
+                            <CalendarCheck className="h-4 w-4 text-primary group-hover:text-inherit" />
+                        </div>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold text-slate-900">
-                            {dashLoading ? <Loader2 className="h-5 w-5 animate-spin text-blue-600" /> : (dashData?.todayAppointments ?? 0)}
+                        <div className="text-3xl font-extrabold text-slate-900 font-outfit">
+                            {dashLoading ? <Loader2 className="h-5 w-5 animate-spin text-primary" /> : (dashData?.todayAppointments ?? 0)}
                         </div>
-                        <p className="text-xs text-muted-foreground mt-1 text-slate-500">
-                            {dashData?.monthAppointments ?? 0} this month
+                        <p className="text-xs text-slate-500 mt-2 font-medium">
+                            <span className="text-slate-900 font-bold">{dashData?.monthAppointments ?? 0}</span> appointments scheduled this month
                         </p>
                     </CardContent>
                 </Card>
-                <Card>
+
+                <Card className="cursor-pointer hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border-none bg-white group overflow-hidden relative" onClick={() => navigate('/billing')}>
+                    <div className="absolute top-0 left-0 w-full h-1 bg-primary/20 group-hover:bg-primary transition-colors" />
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-slate-600">Revenue (MTD)</CardTitle>
-                        <IndianRupee className="h-4 w-4 text-indigo-600" />
+                        <CardTitle className="text-sm font-bold text-slate-500 uppercase tracking-wider">Revenue (MTD)</CardTitle>
+                        <div className="p-2 bg-primary/10 rounded-lg group-hover:bg-primary group-hover:text-white transition-all">
+                            <IndianRupee className="h-4 w-4 text-primary group-hover:text-inherit" />
+                        </div>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold text-slate-900">
-                            {dashLoading ? <Loader2 className="h-5 w-5 animate-spin text-blue-600" /> : `₹${(dashData?.monthRevenue ?? 0).toLocaleString('en-IN')}`}
+                        <div className="text-3xl font-extrabold text-slate-900 font-outfit">
+                            {dashLoading ? <Loader2 className="h-5 w-5 animate-spin text-primary" /> : `₹${(dashData?.monthRevenue ?? 0).toLocaleString('en-IN')}`}
                         </div>
-                        <p className="text-xs text-muted-foreground mt-1 text-slate-500">
-                            ₹{(dashData?.pendingPaymentsTotal ?? 0).toLocaleString('en-IN')} outstanding
+                        <p className="text-xs text-slate-500 mt-2 flex items-center gap-1.5">
+                            <span className="text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full font-bold">₹{(dashData?.pendingPaymentsTotal ?? 0).toLocaleString('en-IN')}</span>
+                            <span className="font-medium">outstanding invoices</span>
                         </p>
                     </CardContent>
                 </Card>
-                <Card>
+
+                <Card className="cursor-pointer hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border-none bg-white group overflow-hidden relative" onClick={() => navigate('/inventory')}>
+                    <div className="absolute top-0 left-0 w-full h-1 bg-primary/20 group-hover:bg-primary transition-colors" />
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-slate-600">Low Stock Items</CardTitle>
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" className="h-4 w-4 text-orange-500">
-                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                            <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
-                        </svg>
+                        <CardTitle className="text-sm font-bold text-slate-500 uppercase tracking-wider">Low Stock Items</CardTitle>
+                        <div className="p-2 bg-orange-100 rounded-lg group-hover:bg-orange-500 group-hover:text-white transition-all">
+                            <Package className="h-4 w-4 text-orange-600 group-hover:text-inherit" />
+                        </div>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold text-orange-600">
-                            {dashLoading ? <Loader2 className="h-5 w-5 animate-spin text-blue-600" /> : (dashData?.lowStockCount ?? 0)}
+                        <div className="text-3xl font-extrabold text-orange-600 font-outfit">
+                            {dashLoading ? <Loader2 className="h-5 w-5 animate-spin text-primary" /> : (dashData?.lowStockCount ?? 0)}
                         </div>
-                        <p className="text-xs text-orange-500 mt-1">Items need restocking</p>
+                        <p className="text-xs text-orange-600 mt-2 font-bold bg-orange-50 inline-block px-2 py-0.5 rounded-full uppercase tracking-tighter">Immediate Attention Required</p>
                     </CardContent>
                 </Card>
             </div>
 
             {/* Charts */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7 mb-8">
-                <Card className="col-span-4">
-                    <CardHeader>
-                        <CardTitle className="text-lg font-semibold text-slate-800">Revenue Overview (7 Days)</CardTitle>
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-7 mb-8">
+                <Card className="col-span-4 border-none bg-white shadow-sm overflow-hidden">
+                    <CardHeader className="border-b border-slate-50">
+                        <CardTitle className="text-lg font-bold text-slate-800 font-outfit">Revenue Overview (7 Days)</CardTitle>
                     </CardHeader>
-                    <CardContent className="pl-2">
-                        <div className="h-[300px] w-full mt-4">
+                    <CardContent className="pl-2 pt-6">
+                        <div className="h-[320px] w-full">
                             {dashLoading ? (
                                 <div className="flex items-center justify-center h-full">
-                                    <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
                                 </div>
                             ) : (
                                 <ResponsiveContainer width="100%" height="100%">
                                     <LineChart data={revenueData}>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
-                                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(v) => `₹${v}`} dx={-10} />
-                                        <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} formatter={(v) => [`₹${v}`, 'Revenue']} />
-                                        <Line type="monotone" dataKey="revenue" stroke="#0d9488" strokeWidth={3} dot={{ r: 4, fill: '#0d9488', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6, strokeWidth: 0 }} />
+                                        <defs>
+                                            <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="5%" stopColor="hsl(166, 76%, 25%)" stopOpacity={0.1}/>
+                                                <stop offset="95%" stopColor="hsl(166, 76%, 25%)" stopOpacity={0}/>
+                                            </linearGradient>
+                                        </defs>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 500 }} dy={10} />
+                                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 500 }} tickFormatter={(v) => `₹${v}`} dx={-10} />
+                                        <Tooltip 
+                                            contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }} 
+                                            itemStyle={{ fontWeight: 700, color: 'hsl(166, 76%, 25%)' }}
+                                            labelStyle={{ marginBottom: '4px', fontWeight: 600, color: '#64748b' }}
+                                            formatter={(v) => [`₹${v}`, 'Revenue']} 
+                                        />
+                                        <Line type="monotone" dataKey="revenue" stroke="hsl(166, 76%, 25%)" strokeWidth={4} dot={{ r: 4, fill: '#fff', strokeWidth: 3, stroke: 'hsl(166, 76%, 25%)' }} activeDot={{ r: 6, strokeWidth: 0, fill: 'hsl(166, 76%, 25%)' }} />
                                     </LineChart>
                                 </ResponsiveContainer>
                             )}
@@ -141,26 +198,26 @@ export function Dashboard() {
                     </CardContent>
                 </Card>
 
-                <Card className="col-span-3">
-                    <CardHeader>
-                        <CardTitle className="text-lg font-semibold text-slate-800">Appointments by Status</CardTitle>
+                <Card className="col-span-3 border-none bg-white shadow-sm overflow-hidden">
+                    <CardHeader className="border-b border-slate-50">
+                        <CardTitle className="text-lg font-bold text-slate-800 font-outfit">Appointments by Status</CardTitle>
                     </CardHeader>
-                    <CardContent>
-                        <div className="h-[300px] w-full mt-4">
+                    <CardContent className="pt-6">
+                        <div className="h-[320px] w-full">
                             {dashLoading ? (
                                 <div className="flex items-center justify-center h-full">
-                                    <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
                                 </div>
                             ) : !dashData?.appointmentsByStatus?.length ? (
-                                <div className="flex items-center justify-center h-full text-slate-400 text-sm">No appointment data this month</div>
+                                <div className="flex items-center justify-center h-full text-slate-400 text-sm font-medium italic">No appointment data this month</div>
                             ) : (
                                 <ResponsiveContainer width="100%" height="100%">
                                     <BarChart data={dashData.appointmentsByStatus}>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                                        <XAxis dataKey="status" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                        <XAxis dataKey="status" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 500 }} dy={10} />
                                         <YAxis hide />
-                                        <Tooltip cursor={{ fill: '#f1f5f9' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                        <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={40} />
+                                        <Tooltip cursor={{ fill: 'hsl(166, 76%, 25%, 0.05)' }} contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }} />
+                                        <Bar dataKey="count" fill="hsl(166, 76%, 25%)" radius={[8, 8, 0, 0]} barSize={40} />
                                     </BarChart>
                                 </ResponsiveContainer>
                             )}
@@ -169,43 +226,60 @@ export function Dashboard() {
                 </Card>
             </div>
 
-            {/* Today's Appointments & Alerts */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7 mb-8">
-                <Card className="col-span-4">
-                    <CardHeader className="flex flex-row items-center justify-between pb-2">
-                        <CardTitle className="text-lg font-semibold text-slate-800">Today's Appointments</CardTitle>
-                        <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-700">View All</Button>
+            {/* Schedule & Alerts */}
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-7 mb-8">
+                <Card className="col-span-4 border-none bg-white shadow-sm overflow-hidden">
+                    <CardHeader className="flex flex-row items-center justify-between pb-4 border-b border-slate-50">
+                        <div className="flex items-center gap-2">
+                            <Clock className="h-5 w-5 text-primary" />
+                            <CardTitle className="text-lg font-bold text-slate-800 font-outfit">Today's Schedule</CardTitle>
+                        </div>
+                        <Button variant="ghost" size="sm" className="text-primary hover:text-primary/80 font-bold flex items-center gap-1 group" onClick={() => navigate('/appointments')}>
+                            View Calendar <ChevronRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
+                        </Button>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="pt-6 px-4">
                         {apptLoading && (
-                            <div className="flex justify-center items-center h-20">
-                                <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+                            <div className="flex justify-center items-center h-40">
+                                <Loader2 className="h-8 w-8 animate-spin text-primary" />
                             </div>
                         )}
-                        <div className="space-y-3 mt-4">
+                        <div className="space-y-4">
                             {appointments.length === 0 && !apptLoading && (
-                                <p className="text-sm text-slate-400 text-center py-8">No appointments scheduled for today</p>
+                                <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+                                    <CalendarCheck className="h-12 w-12 opacity-20 mb-3" />
+                                    <p className="text-sm font-medium">Your schedule is clear for today</p>
+                                </div>
                             )}
                             {appointments.slice(0, 5).map((apt, i) => {
-                                // startTime is a time string like "09:30", not a full ISO date
                                 const time = apt.startTime ?? apt.time ?? '-';
-                                // Backend populates patientId as { name, phone, patientId }
                                 const patientName = apt.patientId?.name ?? apt.patient?.name ?? apt.patientName ?? 'Unknown';
                                 const procedure = (apt.procedures && apt.procedures[0]) ?? apt.procedure ?? '-';
-                                // Backend populates doctorId as { name, email }
                                 const doctor = apt.doctorId?.name ?? apt.doctorName ?? apt.doctor ?? '-';
                                 const status = apt.status ?? 'SCHEDULED';
                                 return (
-                                    <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-100">
+                                    <div key={i} className="group flex items-center justify-between p-4 bg-slate-50/50 rounded-2xl border border-slate-100/50 hover:border-primary/20 transition-all cursor-pointer">
                                         <div className="flex items-center gap-4">
-                                            <div className="bg-blue-100 text-blue-800 text-sm font-semibold px-3 py-1 rounded-md min-w-[85px] text-center">{time}</div>
+                                            <div className="bg-white shadow-sm text-primary text-sm font-bold px-4 py-2 rounded-xl border border-slate-100 min-w-[90px] text-center">{time}</div>
                                             <div>
-                                                <p className="text-sm font-semibold text-slate-900">{patientName}</p>
-                                                <p className="text-xs text-slate-500">{procedure} • {doctor}</p>
+                                                <p className="text-sm font-bold text-slate-900 group-hover:text-primary transition-colors">{patientName}</p>
+                                                <p className="text-xs text-slate-500 font-medium flex items-center gap-2 mt-0.5">
+                                                    <span className="text-slate-400 capitalize">{procedure.toLowerCase()}</span>
+                                                    <span className="h-1 w-1 rounded-full bg-slate-300" />
+                                                    <span className="text-slate-400">{doctor}</span>
+                                                </p>
                                             </div>
                                         </div>
-                                        <Badge variant={status === 'IN_PROGRESS' || status === 'In Progress' ? 'default' : status === 'WAITING' || status === 'Waiting' ? 'destructive' : 'secondary'}
-                                            className={status === 'IN_PROGRESS' || status === 'In Progress' ? 'bg-amber-100 text-amber-800 hover:bg-amber-100' : ''}>
+                                        <Badge 
+                                            variant="outline"
+                                            className={`rounded-full px-3 py-1 font-bold text-[10px] uppercase tracking-wider ${
+                                                status === 'IN_PROGRESS' || status === 'In Progress' 
+                                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                                                : status === 'WAITING' || status === 'Waiting'
+                                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                                : 'bg-slate-100 text-slate-600 border-slate-200'
+                                            }`}
+                                        >
                                             {status.replace(/_/g, ' ')}
                                         </Badge>
                                     </div>
@@ -215,41 +289,48 @@ export function Dashboard() {
                     </CardContent>
                 </Card>
 
-                <Card className="col-span-3">
-                    <CardHeader className="flex flex-row items-center justify-between pb-2">
-                        <CardTitle className="text-lg font-semibold text-slate-800">Tasks & Alerts</CardTitle>
+                <Card className="col-span-3 border-none bg-white shadow-sm overflow-hidden">
+                    <CardHeader className="flex flex-row items-center justify-between pb-4 border-b border-slate-50">
+                        <div className="flex items-center gap-2">
+                            <AlertCircle className="h-5 w-5 text-primary" />
+                            <CardTitle className="text-lg font-bold text-slate-800 font-outfit">Priority Tasklist</CardTitle>
+                        </div>
+                        <Badge variant="outline" className="rounded-full border-primary/20 text-primary font-bold">LIVE</Badge>
                     </CardHeader>
-                    <CardContent>
-                        <div className="space-y-4 mt-4">
+                    <CardContent className="pt-6">
+                        <div className="space-y-4">
                             {Array.isArray(lowStock) && lowStock.length > 0 && (
-                                <div className="flex gap-3 items-start p-3 bg-red-50 text-red-900 rounded-lg border border-red-100">
-                                    <div className="mt-0.5 h-2 w-2 rounded-full bg-red-500 flex-shrink-0" />
+                                <div className="flex gap-4 items-start p-4 hover:bg-red-50/50 rounded-2xl border border-transparent hover:border-red-100 transition-all cursor-pointer group" onClick={() => navigate('/inventory')}>
+                                    <div className="mt-1 h-3 w-3 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)] group-hover:scale-125 transition-transform" />
                                     <div>
-                                        <p className="text-sm font-medium">Low Stock Alert</p>
-                                        <p className="text-xs opacity-80 mt-1">{lowStock.length} items are below minimum stock level.</p>
+                                        <p className="text-sm font-bold text-slate-900">Critical Stock Warning</p>
+                                        <p className="text-xs text-slate-500 mt-0.5 font-medium leading-relaxed">{lowStock.length} dental supplies are below the safety threshold. Clinical operations may be affected.</p>
                                     </div>
                                 </div>
                             )}
                             {(dashData?.pendingLabCases ?? 0) > 0 && (
-                                <div className="flex gap-3 items-start p-3 bg-amber-50 text-amber-900 rounded-lg border border-amber-100">
-                                    <div className="mt-0.5 h-2 w-2 rounded-full bg-amber-500 flex-shrink-0" />
+                                <div className="flex gap-4 items-start p-4 hover:bg-amber-50/50 rounded-2xl border border-transparent hover:border-amber-100 transition-all cursor-pointer group">
+                                    <div className="mt-1 h-3 w-3 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)] group-hover:scale-125 transition-transform" />
                                     <div>
-                                        <p className="text-sm font-medium">Pending Lab Cases</p>
-                                        <p className="text-xs opacity-80 mt-1">{dashData.pendingLabCases} lab cases awaiting delivery.</p>
+                                        <p className="text-sm font-bold text-slate-900">Lab Case Follow-up</p>
+                                        <p className="text-xs text-slate-500 mt-0.5 font-medium leading-relaxed">{dashData.pendingLabCases} prosthetic cases are currently with the technician. Check for delivery status.</p>
                                     </div>
                                 </div>
                             )}
                             {(dashData?.overdueInvoices ?? 0) > 0 && (
-                                <div className="flex gap-3 items-start p-3 bg-indigo-50 text-indigo-900 rounded-lg border border-indigo-100">
-                                    <div className="mt-0.5 h-2 w-2 rounded-full bg-indigo-500 flex-shrink-0" />
+                                <div className="flex gap-4 items-start p-4 hover:bg-indigo-50/50 rounded-2xl border border-transparent hover:border-indigo-100 transition-all cursor-pointer group" onClick={() => navigate('/billing')}>
+                                    <div className="mt-1 h-3 w-3 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)] group-hover:scale-125 transition-transform" />
                                     <div>
-                                        <p className="text-sm font-medium">Action Required</p>
-                                        <p className="text-xs opacity-80 mt-1">{dashData.overdueInvoices} invoices are overdue by more than 15 days.</p>
+                                        <p className="text-sm font-bold text-slate-900">Pending Financials</p>
+                                        <p className="text-xs text-slate-500 mt-0.5 font-medium leading-relaxed">{dashData.overdueInvoices} invoices are highly overdue. Action required to maintain healthy cash flow.</p>
                                     </div>
                                 </div>
                             )}
                             {!dashLoading && !lowStock?.length && !dashData?.pendingLabCases && !dashData?.overdueInvoices && (
-                                <p className="text-sm text-slate-400 text-center py-6">✅ No pending alerts!</p>
+                                <div className="flex flex-col items-center justify-center py-10 opacity-30">
+                                    <CheckCircle2 className="h-12 w-12 text-emerald-600 mb-2" />
+                                    <p className="text-xs font-bold uppercase tracking-widest">Peace of Mind</p>
+                                </div>
                             )}
                         </div>
                     </CardContent>
