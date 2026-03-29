@@ -6,6 +6,8 @@ import express from 'express';
 
 const server = express();
 
+let cachedServer: any;
+
 export const createServer = async () => {
   const app = await NestFactory.create(AppModule, new ExpressAdapter(server));
   
@@ -24,6 +26,8 @@ export const createServer = async () => {
 };
 
 export default async (req: any, res: any) => {
-  await createServer();
-  server(req, res);
+  if (!cachedServer) {
+    cachedServer = await createServer();
+  }
+  cachedServer(req, res);
 };
