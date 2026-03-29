@@ -476,8 +476,8 @@ export class WhatsappService {
           // Back from date → re-show doctor list
           session.state = SessionState.SELECTING_DOCTOR;
           const doctors = await this.getDoctors(tenantId);
-          session.context = { ...session.context, doctorList: doctors.map(d => d._id.toString()) };
-          await this.menuFlow.sendDoctorList(from, doctors);
+          session.context = { ...session.context, doctorList: doctors.map(d => d.id) };
+          await this.menuFlow.sendDoctorList(from, doctors as any);
           break;
         case SessionState.SELECTING_SLOT:
           // Back from slot → re-show date menu
@@ -533,10 +533,10 @@ export class WhatsappService {
       const doctors = await this.getDoctors(tenantId);
       session.context = {
         ...session.context,
-        doctorList: doctors.map(d => d._id.toString()),
+        doctorList: doctors.map(d => d.id),
       };
       session.state = SessionState.SELECTING_DOCTOR;
-      await this.menuFlow.sendDoctorList(from, doctors);
+      await this.menuFlow.sendDoctorList(from, doctors as any);
       return true;
     }
 
@@ -557,7 +557,7 @@ export class WhatsappService {
     // Option 4: Our Doctors (info only, no booking state change)
     if (text === '4' || text === 'doctors' || text === 'our doctors') {
       const doctors = await this.getDoctors(tenantId);
-      await this.menuFlow.sendDoctorList(from, doctors);
+      await this.menuFlow.sendDoctorList(from, doctors as any);
       session.state = SessionState.IDLE;
       return true;
     }

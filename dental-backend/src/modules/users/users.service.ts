@@ -1,62 +1,79 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
-import { User, UserDocument } from './user.schema';
+import { PrismaService } from '../database/prisma.service';
+import { User, Role } from '@prisma/client';
 
 @Injectable()
 export class UsersService {
-  constructor(@InjectModel(User.name) private userModel: Model<UserDocument>) { }
+  constructor(private prisma: PrismaService) { }
 
-  async create(tenantId: string, dto: Partial<User>): Promise<UserDocument> {
-    const user = new this.userModel({
-      ...dto,
-      tenantId: new Types.ObjectId(tenantId),
+  async create(tenantId: string, dto: Partial<User>): Promise<User> {
+    return this.prisma.user.create({
+      data: {
+        ...(dto as any),
+        tenantId,
+      },
     });
-    return user.save();
   }
 
-  async findByEmailForAuth(email: string): Promise<UserDocument | null> {
-    return this.userModel.findOne({ email }).select('+passwordHash').exec();
+  async findByEmailForAuth(email: string): Promise<User | null> {
+    // Prisma includes all fields by default unless specified otherwise.
+    // In SQL, we don't have a hidden 'passwordHash' by default like Mongoose.
+    return this.prisma.user.findUnique({
+      where: { email },
+    });
   }
 
   async checkEmailExists(email: string): Promise<boolean> {
-    const user = await this.userModel.findOne({ email } as any).exec();
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
     return !!user;
   }
 
-  async findById(id: string): Promise<UserDocument | null> {
-    return this.userModel.findById(id).exec();
-  }
-
-  async findByIdWithPassword(id: string): Promise<UserDocument | null> {
-    return this.userModel.findById(id).select('+passwordHash').exec();
-  }
-
-  async updatePassword(id: string, passwordHash: string): Promise<void> {
-    await this.userModel.updateOne({ _id: new Types.ObjectId(id) } as any, {
-      $set: { passwordHash },
+  async findById(id: string): Promise<User | null> {
+    return this.prisma.user.findUnique({
+      where: { id },
     });
   }
 
-  async findAllByTenant(tenantId: string): Promise<UserDocument[]> {
-    return this.userModel
-      .find({ tenantId: new Types.ObjectId(tenantId) } as any)
-      .exec();
+  async findByIdWithPassword(id: string): Promise<User | null> {
+    return this.prisma.user.findUnique({
+      where: { id },
+    });
   }
 
-  async findDoctorsByTenant(tenantId: string): Promise<UserDocument[]> {
+  async updatePassword(id: string, passwordHash: string): Promise<void> {
+    await this.prisma.user.update({
+      where: { id },
+      data: { password: passwordHash },
+    });
+  }
+
+  async findAllByTenant(tenantId: string): Promise<User[]> {
+    return this.prisma.user.findMany({
+      where: { tenantId },
+    });
+  }
+
+  async findDoctorsByTenant(tenantId: string): Promise<Partial<User>[]> {
     // Include both DOCTOR role and ADMIN users who have a doctorProfile
-    return this.userModel
-      .find({
-        tenantId: new Types.ObjectId(tenantId),
+    return this.prisma.user.findMany({
+      where: {
+        tenantId,
         isActive: true,
-        $or: [
-          { role: 'DOCTOR' },
-          { role: 'ADMIN' },
+        OR: [
+          { role: Role.DOCTOR },
+          { role: Role.ADMIN },
         ],
-      } as any)
-      .select('name email role doctorProfile')
-      .lean()
-      .exec() as any;
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        doctorProfile: true,
+      },
+    });
   }
 }

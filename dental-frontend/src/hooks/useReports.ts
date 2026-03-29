@@ -8,9 +8,9 @@ export function useDashboard() {
             const res = await api.get('/reports/dashboard');
             return res.data?.data || res.data || {};
         },
-        staleTime: 0,
-        refetchOnWindowFocus: true,
-        refetchInterval: 2 * 60 * 1000, // refresh every 2 mins
+        staleTime: 2 * 60 * 1000, // 2 minute cache
+        refetchOnWindowFocus: false,
+        refetchInterval: 5 * 60 * 1000, // refresh every 5 mins
     });
 }
 
@@ -22,8 +22,8 @@ export function useRevenueDaily(from?: string, to?: string) {
             const payload = res.data?.data || res.data;
             return Array.isArray(payload) ? payload : [];
         },
-        staleTime: 0,
-        refetchOnWindowFocus: true,
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: false,
     });
 }
 
@@ -35,8 +35,8 @@ export function useRevenueMonthly(from?: string, to?: string) {
             const payload = res.data?.data || res.data;
             return Array.isArray(payload) ? payload : [];
         },
-        staleTime: 0,
-        refetchOnWindowFocus: true,
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: false,
     });
 }
 
@@ -48,8 +48,8 @@ export function useRevenueByDoctor(from?: string, to?: string) {
             const payload = res.data?.data || res.data;
             return Array.isArray(payload) ? payload : [];
         },
-        staleTime: 0,
-        refetchOnWindowFocus: true,
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: false,
     });
 }
 
@@ -60,8 +60,8 @@ export function useAppointmentsSummary(from?: string, to?: string) {
             const res = await api.get('/reports/appointments/summary', { params: { from, to } });
             return res.data?.data || res.data || {};
         },
-        staleTime: 0,
-        refetchOnWindowFocus: true,
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: false,
     });
 }
 
@@ -73,8 +73,8 @@ export function usePatientGrowth(from?: string, to?: string) {
             const payload = res.data?.data || res.data;
             return Array.isArray(payload) ? payload : [];
         },
-        staleTime: 0,
-        refetchOnWindowFocus: true,
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: false,
     });
 }
 
@@ -86,8 +86,8 @@ export function useInventoryExpenses(from?: string, to?: string) {
             const payload = res.data?.data || res.data;
             return Array.isArray(payload) ? payload : [];
         },
-        staleTime: 0,
-        refetchOnWindowFocus: true,
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: false,
     });
 }
 
@@ -99,8 +99,8 @@ export function useChairUtilization(from?: string, to?: string) {
             const payload = res.data?.data || res.data;
             return Array.isArray(payload) ? payload : [];
         },
-        staleTime: 0,
-        refetchOnWindowFocus: true,
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: false,
     });
 }
 
@@ -112,7 +112,7 @@ export function usePendingPayments() {
             const payload = res.data?.data || res.data;
             return Array.isArray(payload) ? payload : [];
         },
-        staleTime: 0,
-        refetchOnWindowFocus: true,
+        staleTime: 2 * 60 * 1000,
+        refetchOnWindowFocus: false,
     });
 }

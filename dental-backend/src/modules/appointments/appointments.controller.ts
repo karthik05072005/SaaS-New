@@ -10,6 +10,7 @@ import {
   UseGuards,
   Request,
 } from '@nestjs/common';
+import { AppointmentStatus } from '@prisma/client';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -59,7 +60,7 @@ export class AppointmentsController {
     return this.appointmentsService.findAll(req.tenantId, pagination, {
       date,
       doctorId,
-      status,
+      status: status as AppointmentStatus,
       patientId,
     });
   }

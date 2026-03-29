@@ -1,12 +1,6 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
-import { Patient, PatientDocument } from './patient.schema';
-import { ClinicalNote, ClinicalNoteDocument } from './clinical-note.schema';
-import {
-  PatientDocument as PatientDoc,
-  PatientDocumentDoc,
-} from './patient-document.schema';
+import { PrismaService } from '../database/prisma.service';
+import { Patient, ClinicalNote, PatientDocument, Gender } from '@prisma/client';
 import {
   CreatePatientDto,
   UpdatePatientDto,
@@ -14,24 +8,14 @@ import {
   AddDocumentDto,
 } from './dto/patient.dto';
 import { PaginationDto } from '../../common/dto/pagination.dto';
-import {
-  Appointment,
-  AppointmentDocument,
-} from '../appointments/appointment.schema';
 
 @Injectable()
 export class PatientsService {
   private readonly logger = new Logger(PatientsService.name);
 
   constructor(
-    @InjectModel(Patient.name) private patientModel: Model<PatientDocument>,
-    @InjectModel(ClinicalNote.name)
-    private clinicalNoteModel: Model<ClinicalNoteDocument>,
-    @InjectModel(PatientDoc.name)
-    private patientDocModel: Model<PatientDocumentDoc>,
-    @InjectModel(Appointment.name)
-    private appointmentModel: Model<AppointmentDocument>,
-  ) {}
+    private prisma: PrismaService,
+  ) { }
 
   // ─── Patient ID Generation ─────────────────────────────────────────────────
   /**
@@ -40,9 +24,9 @@ export class PatientsService {
    */
   private async generatePatientId(tenantId: string): Promise<string> {
     const year = new Date().getFullYear();
-    const count = await this.patientModel.countDocuments({
-      tenantId: new Types.ObjectId(tenantId),
-    } as any);
+    const count = await this.prisma.patient.count({
+      where: { tenantId },
+    });
     const seq = String(count + 1).padStart(4, '0');
     return `CLN-${year}-${seq}`;
   }
@@ -52,107 +36,106 @@ export class PatientsService {
     tenantId: string,
     userId: string,
     dto: CreatePatientDto,
-  ): Promise<PatientDocument> {
+  ): Promise<Patient> {
     const patientId = await this.generatePatientId(tenantId);
-    const patient = new this.patientModel({
-      ...dto,
-      tenantId: new Types.ObjectId(tenantId),
-      patientId,
-      firstVisit: new Date(),
-      createdBy: new Types.ObjectId(userId),
+    return this.prisma.patient.create({
+      data: {
+        ...(dto as any),
+        tenantId,
+        patientId,
+        firstVisit: new Date(),
+        createdByUserId: userId,
+      },
     });
-    return patient.save();
   }
 
   async findAll(tenantId: string, pagination: PaginationDto, search?: string) {
-    const query: Record<string, unknown> = {
-      tenantId: new Types.ObjectId(tenantId),
-    };
-
-    if (search) {
-      // Search by name, phone, or patientId
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
-        { patientId: { $regex: search, $options: 'i' } },
-      ];
-    }
-
     const { page = 1, limit = 20 } = pagination;
     const skip = (page - 1) * limit;
 
+    const where: any = { tenantId };
+
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search, mode: 'insensitive' } },
+        { patientId: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
     const [data, total] = await Promise.all([
-      this.patientModel
-        .find(query as any)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit),
-      this.patientModel.countDocuments(query as any),
+      this.prisma.patient.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.patient.count({ where }),
     ]);
 
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findOne(tenantId: string, id: string): Promise<PatientDocument> {
-    const patient = await this.patientModel.findOne({
-      _id: new Types.ObjectId(id),
-      tenantId: new Types.ObjectId(tenantId),
-    } as any);
+  async findOne(tenantId: string, id: string): Promise<Patient> {
+    const patient = await this.prisma.patient.findFirst({
+      where: { id, tenantId },
+    });
     if (!patient) throw new NotFoundException('Patient not found');
     return patient;
   }
 
-  // Find patient by ID only (for use in other services)
-  async findById(id: string): Promise<PatientDocument | null> {
-    return this.patientModel.findById(id).exec();
+  async findById(id: string): Promise<Patient | null> {
+    return this.prisma.patient.findUnique({
+      where: { id },
+    });
   }
 
-  // Search patients for autocomplete (returns limited fields)
-  async searchPatients(tenantId: string, query: string): Promise<PatientDocument[]> {
-    const searchQuery = {
-      tenantId: new Types.ObjectId(tenantId),
-      $or: [
-        { name: { $regex: query, $options: 'i' } },
-        { phone: { $regex: query, $options: 'i' } },
-        { patientId: { $regex: query, $options: 'i' } },
-      ],
-    };
-
-    return this.patientModel
-      .find(searchQuery as any)
-      .select('_id name phone patientId lastVisit')
-      .limit(10)
-      .exec();
+  async searchPatients(tenantId: string, query: string): Promise<Partial<Patient>[]> {
+    return this.prisma.patient.findMany({
+      where: {
+        tenantId,
+        OR: [
+          { name: { contains: query, mode: 'insensitive' } },
+          { phone: { contains: query, mode: 'insensitive' } },
+          { patientId: { contains: query, mode: 'insensitive' } },
+        ],
+      },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        patientId: true,
+        lastVisit: true,
+      },
+      take: 10,
+    });
   }
 
   async update(
     tenantId: string,
     id: string,
     dto: UpdatePatientDto,
-  ): Promise<PatientDocument> {
-    const patient = await this.patientModel.findOneAndUpdate(
-      {
-        _id: new Types.ObjectId(id),
-        tenantId: new Types.ObjectId(tenantId),
-      } as any,
-      { $set: dto },
-      { new: true },
-    );
-    if (!patient) throw new NotFoundException('Patient not found');
-    return patient as unknown as PatientDocument;
+  ): Promise<Patient> {
+    try {
+      return await this.prisma.patient.update({
+        where: { id },
+        data: dto as any,
+      });
+    } catch (error) {
+      throw new NotFoundException('Patient not found');
+    }
   }
 
   // ─── History & Appointments ─────────────────────────────────────────────────
   async getHistory(tenantId: string, patientId: string) {
     const patient = await this.findOne(tenantId, patientId);
-    const notes = await this.clinicalNoteModel
-      .find({
-        tenantId: new Types.ObjectId(tenantId),
-        patientId: new Types.ObjectId(patientId),
-      } as any)
-      .populate('doctorId', 'name email')
-      .populate('appointmentId')
-      .sort({ createdAt: -1 });
+    const notes = await this.prisma.clinicalNote.findMany({
+      where: { tenantId, patientId },
+      include: {
+        patient: { select: { name: true, email: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
 
     return { patient, notes };
   }
@@ -164,18 +147,20 @@ export class PatientsService {
   ) {
     const { page = 1, limit = 20 } = pagination;
     const skip = (page - 1) * limit;
-    const query = {
-      tenantId: new Types.ObjectId(tenantId),
-      patientId: new Types.ObjectId(patientId),
-    };
+
     const [data, total] = await Promise.all([
-      this.appointmentModel
-        .find(query as any)
-        .populate('doctorId', 'name email')
-        .sort({ date: -1 })
-        .skip(skip)
-        .limit(limit),
-      this.appointmentModel.countDocuments(query as any),
+      this.prisma.appointment.findMany({
+        where: { tenantId, patientId },
+        include: {
+          doctor: { select: { id: true, name: true, email: true } },
+        },
+        orderBy: { date: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.appointment.count({
+        where: { tenantId, patientId },
+      }),
     ]);
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
@@ -186,28 +171,33 @@ export class PatientsService {
     patientId: string,
     userId: string,
     dto: AddClinicalNoteDto,
-  ): Promise<ClinicalNoteDocument> {
-    await this.findOne(tenantId, patientId); // ensure patient exists in tenant
+  ): Promise<ClinicalNote> {
+    await this.findOne(tenantId, patientId);
 
-    const note = new this.clinicalNoteModel({
-      ...dto,
-      tenantId: new Types.ObjectId(tenantId),
-      patientId: new Types.ObjectId(patientId),
-      doctorId: new Types.ObjectId(dto.doctorId),
-      ...(dto.appointmentId && {
-        appointmentId: new Types.ObjectId(dto.appointmentId),
-      }),
+    const note = await this.prisma.clinicalNote.create({
+      data: {
+        chiefComplaint: dto.chiefComplaint,
+        findings: dto.clinicalFindings,
+        diagnosis: dto.diagnosis,
+        treatmentPlan: dto.treatmentPlan,
+        vitals: {} as any,
+        prescriptions: dto.prescriptions as any || [],
+        tenantId,
+        patientId,
+        doctorId: dto.doctorId || userId,
+      },
     });
 
-    const saved = await note.save();
-
     // Update patient's lastVisit and totalVisits
-    await this.patientModel.updateOne(
-      { _id: new Types.ObjectId(patientId) } as any,
-      { $set: { lastVisit: new Date() }, $inc: { totalVisits: 1 } },
-    );
+    await this.prisma.patient.update({
+      where: { id: patientId },
+      data: {
+        lastVisit: new Date(),
+        totalVisits: { increment: 1 },
+      },
+    });
 
-    return saved;
+    return note;
   }
 
   async getNotes(
@@ -217,19 +207,17 @@ export class PatientsService {
   ) {
     const { page = 1, limit = 20 } = pagination;
     const skip = (page - 1) * limit;
-    const query = {
-      tenantId: new Types.ObjectId(tenantId),
-      patientId: new Types.ObjectId(patientId),
-    };
 
     const [data, total] = await Promise.all([
-      this.clinicalNoteModel
-        .find(query as any)
-        .populate('doctorId', 'name email')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit),
-      this.clinicalNoteModel.countDocuments(query as any),
+      this.prisma.clinicalNote.findMany({
+        where: { tenantId, patientId },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.clinicalNote.count({
+        where: { tenantId, patientId },
+      }),
     ]);
 
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
@@ -240,18 +228,15 @@ export class PatientsService {
     patientId: string,
     noteId: string,
     dto: Partial<AddClinicalNoteDto>,
-  ): Promise<ClinicalNoteDocument> {
-    const note = await this.clinicalNoteModel.findOneAndUpdate(
-      {
-        _id: new Types.ObjectId(noteId),
-        tenantId: new Types.ObjectId(tenantId),
-        patientId: new Types.ObjectId(patientId),
-      } as any,
-      { $set: dto },
-      { new: true },
-    );
-    if (!note) throw new NotFoundException('Clinical note not found');
-    return note as unknown as ClinicalNoteDocument;
+  ): Promise<ClinicalNote> {
+    try {
+      return await this.prisma.clinicalNote.update({
+        where: { id: noteId },
+        data: dto as any,
+      });
+    } catch (error) {
+      throw new NotFoundException('Clinical note not found');
+    }
   }
 
   // ─── Documents ─────────────────────────────────────────────────────────────
@@ -260,28 +245,26 @@ export class PatientsService {
     patientId: string,
     userId: string,
     dto: AddDocumentDto,
-  ): Promise<PatientDocumentDoc> {
+  ): Promise<PatientDocument> {
     await this.findOne(tenantId, patientId);
 
-    const doc = new this.patientDocModel({
-      ...dto,
-      tenantId: new Types.ObjectId(tenantId),
-      patientId: new Types.ObjectId(patientId),
-      uploadedBy: new Types.ObjectId(userId),
-      ...(dto.appointmentId && {
-        appointmentId: new Types.ObjectId(dto.appointmentId),
-      }),
+    return this.prisma.patientDocument.create({
+      data: {
+        name: dto.fileName,
+        fileType: dto.fileType,
+        fileUrl: dto.fileUrl,
+        category: dto.fileType,
+        notes: '',
+        tenantId,
+        patientId,
+      },
     });
-    return doc.save();
   }
 
   async getDocuments(tenantId: string, patientId: string) {
-    return this.patientDocModel
-      .find({
-        tenantId: new Types.ObjectId(tenantId),
-        patientId: new Types.ObjectId(patientId),
-      } as any)
-      .populate('uploadedBy', 'name email')
-      .sort({ createdAt: -1 });
+    return this.prisma.patientDocument.findMany({
+      where: { tenantId, patientId },
+      orderBy: { uploadedAt: 'desc' },
+    });
   }
 }

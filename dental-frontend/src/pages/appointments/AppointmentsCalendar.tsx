@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Calendar, dateFnsLocalizer, View } from 'react-big-calendar';
 import { format, parse, startOfWeek, getDay } from 'date-fns';
 import { enUS } from 'date-fns/locale/en-US';
@@ -9,7 +10,7 @@ import { Button } from '../../components/ui/button';
 import {
     Plus, X, Loader2, Calendar as CalendarIcon,
     User, Stethoscope, CheckCircle2, AlertCircle,
-    Sparkles, Camera, Image as ImageIcon, Search
+    Sparkles, Camera, Image as ImageIcon, Search, MessageCircle
 } from 'lucide-react';
 import { Badge } from '../../components/ui/badge';
 import { Card, CardContent } from '../../components/ui/card';
@@ -112,6 +113,8 @@ const CLINIC_CHAIRS: { id: string; name: string; color: string; light: string }[
 ];
 
 export function AppointmentsCalendar() {
+    const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const [view, setView] = useState<View>('month');
     const [date, setDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -128,6 +131,7 @@ export function AppointmentsCalendar() {
     const [patientSearchResults, setPatientSearchResults] = useState<any[]>([]);
     const [isSearchingPatients, setIsSearchingPatients] = useState(false);
     const [isExistingPatientMode, setIsExistingPatientMode] = useState(false);
+    const prefilledPatientId = searchParams.get('patient');
 
     // Form state — new patient details
     const [newPatientName, setNewPatientName] = useState('');
@@ -241,6 +245,24 @@ export function AppointmentsCalendar() {
     }, [showCamera, stream]);
 
     const { token } = useAuthStore();
+
+    // Pre-fill patient from ?patient= URL param
+    useEffect(() => {
+        if (prefilledPatientId && token) {
+            api.get(`/patients/${prefilledPatientId}`).then(res => {
+                const p = res.data?.data || res.data;
+                if (p) {
+                    setSelectedPatientId(p._id);
+                    setSelectedPatientName(p.name);
+                    setPatientEmail(p.email || '');
+                    setIsExistingPatientMode(true);
+                    setIsBookingDialogOpen(true);
+                    setSelectedDate(format(new Date(), 'yyyy-MM-dd'));
+                }
+            }).catch(() => {});
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [prefilledPatientId, token]);
 
     const { startDate, endDate } = useMemo(() => {
         const start = new Date(date.getFullYear(), date.getMonth() - 1, 1);
@@ -835,7 +857,29 @@ export function AppointmentsCalendar() {
                                         <p className="text-sm bg-gray-50 p-3 rounded-lg mt-1">{selectedAppointment.chiefComplaint}</p>
                                     </div>
                                 )}
-                                <Button variant="outline" className="w-full mt-4" onClick={() => setIsDetailDialogOpen(false)}>Close</Button>
+                                <div className="flex gap-2 mt-4">
+                                    <Button variant="outline" className="flex-1" onClick={() => setIsDetailDialogOpen(false)}>Close</Button>
+                                    <Button
+                                        className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                                        onClick={() => {
+                                            const phone = selectedAppointment.patientId.phone.replace(/\D/g, '');
+                                            const dateFormatted = format(new Date(selectedAppointment.date), 'PPPP');
+                                            const message = `Hello ${selectedAppointment.patientId.name},\n\nThis is a reminder for your dental appointment.\n👨‍⚕️ Doctor: Dr. ${selectedAppointment.doctorId.name}\n📅 Date: ${dateFormatted}\n⏰ Time: ${selectedAppointment.startTime} - ${selectedAppointment.endTime}\n🩺 Type: ${selectedAppointment.type}\n\nPlease arrive 10 minutes early.`;
+                                            window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
+                                        }}
+                                    >
+                                        <MessageCircle className="mr-2 h-4 w-4" /> WhatsApp
+                                    </Button>
+                                    <Button
+                                        className="flex-1 bg-blue-600 hover:bg-blue-700"
+                                        onClick={() => {
+                                            setIsDetailDialogOpen(false);
+                                            navigate(`/patients/${selectedAppointment.patientId._id}`);
+                                        }}
+                                    >
+                                        <User className="mr-2 h-4 w-4" /> View Patient
+                                    </Button>
+                                </div>
                             </div>
                         </div>
                     )}

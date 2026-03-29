@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageWrapper } from '../../components/layout/PageWrapper';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -34,16 +34,22 @@ interface LineItem {
 
 export function NewInvoice() {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const prefillPatientId = searchParams.get('patientId');
     
     // Form State
-    const [selectedPatientId, setSelectedPatientId] = useState<string>('');
+    const [selectedPatientId, setSelectedPatientId] = useState<string>(prefillPatientId || '');
     const [selectedDoctorId, setSelectedDoctorId] = useState<string>('');
     const [issueDate, setIssueDate] = useState(format(new Date(), 'yyyy-MM-dd'));
     const [notes, setNotes] = useState('');
     const [applyGst, setApplyGst] = useState(true);
+    const [saveError, setSaveError] = useState<string | null>(null);
     const [lineItems, setLineItems] = useState<LineItem[]>([
         { id: Math.random().toString(36).substring(2, 9), description: '', quantity: 1, unitPrice: 0 }
     ]);
+
+    // Auto-select patient name when prefill is set
+    const [prefillPatientName, setPrefillPatientName] = useState<string>('');
 
     // Data Hooks
     const { data: patients = [] } = usePatients();
@@ -51,6 +57,14 @@ export function NewInvoice() {
     const { data: procedures = [] } = useProcedures();
     const createInvoice = useCreateInvoice();
     const issueInvoice = useIssueInvoice();
+
+    // Set prefill patient name from patient list
+    useEffect(() => {
+        if (prefillPatientId && Array.isArray(patients) && patients.length > 0) {
+            const p: any = patients.find((x: any) => x._id === prefillPatientId);
+            if (p) setPrefillPatientName(p.name);
+        }
+    }, [prefillPatientId, patients]);
 
     // Calculations
     const totals = useMemo(() => {
@@ -91,15 +105,16 @@ export function NewInvoice() {
     };
 
     const handleSave = async () => {
-        if (!selectedPatientId || !selectedDoctorId || lineItems.some(i => !i.description)) {
-            alert("Please fill in all required fields.");
+        if (!selectedPatientId || lineItems.some(i => !i.description)) {
+            setSaveError('Please select a patient and fill in all service descriptions.');
             return;
         }
+        setSaveError(null);
 
         try {
             const invoiceData = {
                 patientId: selectedPatientId,
-                doctorId: selectedDoctorId,
+                doctorId: selectedDoctorId || undefined,
                 notes,
                 lineItems: lineItems.map(item => ({
                     procedureId: item.procedureId,
@@ -111,13 +126,13 @@ export function NewInvoice() {
             };
 
             const result = await createInvoice.mutateAsync(invoiceData);
-            if (result?._id) {
-                await issueInvoice.mutateAsync(result._id);
+            const invoiceId = result?._id || result?.data?._id;
+            if (invoiceId) {
+                await issueInvoice.mutateAsync(invoiceId);
             }
             navigate('/billing');
-        } catch (error) {
-            console.error("Failed to create invoice:", error);
-            alert("Failed to create invoice. Please try again.");
+        } catch (error: any) {
+            setSaveError(error?.response?.data?.message || 'Failed to create invoice. Please try again.');
         }
     };
 
@@ -135,6 +150,16 @@ export function NewInvoice() {
         >
             <Card className="border-slate-200 shadow-sm">
                 <CardContent className="p-6">
+                    {saveError && (
+                        <div className="mb-6 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm font-medium flex items-center gap-2">
+                            <span className="text-red-500">⚠</span> {saveError}
+                        </div>
+                    )}
+                    {prefillPatientId && prefillPatientName && (
+                        <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm font-medium flex items-center gap-2">
+                            <span className="text-blue-600">👤</span> Creating invoice for <strong>{prefillPatientName}</strong>
+                        </div>
+                    )}
                     <div className="grid gap-8 md:grid-cols-2 mb-10">
                         {/* Patient Selection */}
                         <div className="space-y-2">

@@ -12,6 +12,7 @@ import { PatientProfile } from './pages/patients/PatientProfile';
 import { BillingList } from './pages/billing/BillingList';
 import { NewInvoice } from './pages/billing/NewInvoice';
 import { InvoiceDetails } from './pages/billing/InvoiceDetails';
+import { EditInvoice } from './pages/billing/EditInvoice';
 import { InventoryList } from './pages/inventory/InventoryList';
 import { ReportsView } from './pages/reports/ReportsView';
 import { SettingsView } from './pages/settings/SettingsView';
@@ -75,6 +76,7 @@ export default function App() {
             <Route index element={<BillingList />} />
             <Route path="new" element={<NewInvoice />} />
             <Route path=":id" element={<InvoiceDetails />} />
+            <Route path="edit/:id" element={<EditInvoice />} />
           </Route>
 
           <Route path="inventory">

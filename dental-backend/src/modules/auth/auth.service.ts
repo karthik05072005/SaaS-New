@@ -4,11 +4,12 @@ import {
   ConflictException,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { TenantService } from '../tenant/tenant.service';
-import { Role } from '../../common/constants/roles.constant';
+import { Role } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -16,6 +17,8 @@ import { CreateUserDto, ChangePasswordDto } from './dto/create-user.dto';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private usersService: UsersService,
     private tenantService: TenantService,
@@ -32,18 +35,17 @@ export class AuthService {
 
     const tenant = await this.tenantService.createTenant(clinicName, email, phone);
     const salt = await bcrypt.genSalt();
-    const passwordHash = await bcrypt.hash(password, salt);
+    const hashedPassword = await bcrypt.hash(password, salt);
 
-    const user = await this.usersService.create(tenant._id.toString(), {
+    const user = await this.usersService.create(tenant.id, {
       name: userName || 'Admin',
       email,
-      passwordHash,
-      phone,
+      password: hashedPassword,
       role: Role.ADMIN,
     });
 
     const payload = {
-      sub: user._id,
+      sub: user.id,
       email: user.email,
       role: user.role,
       tenantId: user.tenantId,
@@ -56,30 +58,35 @@ export class AuthService {
   }
 
   async login(loginDto: LoginDto) {
-    const user = await this.usersService.findByEmailForAuth(loginDto.email);
-    if (
-      !user ||
-      !(await bcrypt.compare(loginDto.password, user.passwordHash))
-    ) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
+    try {
+      const user = await this.usersService.findByEmailForAuth(loginDto.email);
+      if (
+        !user ||
+        !(await bcrypt.compare(loginDto.password, user.password))
+      ) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
 
-    const payload = {
-      sub: user._id,
-      email: user.email,
-      role: user.role,
-      tenantId: user.tenantId,
-    };
-    return {
-      access_token: this.jwtService.sign(payload),
-      user: {
-        id: user._id,
-        name: user.name,
+      const payload = {
+        sub: user.id,
         email: user.email,
         role: user.role,
         tenantId: user.tenantId,
-      },
-    };
+      };
+      return {
+        access_token: this.jwtService.sign(payload),
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          tenantId: user.tenantId,
+        },
+      };
+    } catch (error: any) {
+      this.logger.error(`Login Error: ${error.message}`, error.stack);
+      throw error;
+    }
   }
 
   /**
@@ -90,14 +97,14 @@ export class AuthService {
     if (userExists) throw new ConflictException('Email already in use.');
 
     const salt = await bcrypt.genSalt();
-    const passwordHash = await bcrypt.hash(dto.password, salt);
+    const password = await bcrypt.hash(dto.password, salt);
 
     return this.usersService.create(tenantId, {
       name: dto.name,
       email: dto.email,
-      passwordHash,
-      role: dto.role,
-      doctorProfile: dto.doctorProfile,
+      password,
+      role: dto.role as Role,
+      doctorProfile: dto.doctorProfile as any,
     });
   }
 
@@ -108,7 +115,7 @@ export class AuthService {
     const user = await this.usersService.findById(userId);
     if (!user) throw new NotFoundException('User not found');
     // Remove sensitive fields
-    const { passwordHash: _, ...profile } = user as any;
+    const { password: _, ...profile } = user as any;
     return profile;
   }
 
@@ -121,7 +128,7 @@ export class AuthService {
 
     const isMatch = await bcrypt.compare(
       dto.currentPassword,
-      user.passwordHash,
+      user.password,
     );
     if (!isMatch)
       throw new BadRequestException('Current password is incorrect');

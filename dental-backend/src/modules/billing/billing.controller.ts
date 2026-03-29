@@ -11,6 +11,7 @@ import {
   Request,
   Res,
 } from '@nestjs/common';
+import { InvoiceStatus } from '@prisma/client';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -90,7 +91,7 @@ export class BillingController {
     @Query('to') to?: string,
   ) {
     return this.billingService.getInvoices(req.tenantId, pagination, {
-      status,
+      status: status as InvoiceStatus,
       patientId,
       doctorId,
       from,
@@ -162,7 +163,7 @@ export class BillingController {
     @Param('id') id: string,
     @Body() dto: CreateInvoiceDto,
   ) {
-    return this.billingService.updateDraftInvoice(req.tenantId, id, dto);
+    return this.billingService.updateInvoice(req.tenantId, id, dto);
   }
 
   @Get('invoices/:id/pdf')

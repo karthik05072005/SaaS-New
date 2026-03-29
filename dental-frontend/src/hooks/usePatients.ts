@@ -11,7 +11,6 @@ export function usePatients(params: PaginationParams = {}) {
     return useQuery({
         queryKey: ['patients', params],
         queryFn: async () => {
-            // Only include search when it has a value — backend rejects empty search= param
             const queryParams: Record<string, unknown> = {};
             if (params.page) queryParams.page = params.page;
             if (params.limit) queryParams.limit = params.limit;
@@ -21,11 +20,10 @@ export function usePatients(params: PaginationParams = {}) {
             const payload = res.data?.data || res.data;
             return Array.isArray(payload) ? payload : [];
         },
-        staleTime: 0,
-        refetchOnWindowFocus: true,
+        staleTime: 60 * 1000, // 1 minute
+        refetchOnWindowFocus: false,
     });
 }
-
 
 export function usePatient(id: string) {
     return useQuery({
@@ -35,8 +33,8 @@ export function usePatient(id: string) {
             return res.data?.data || res.data;
         },
         enabled: !!id,
-        staleTime: 0,
-        refetchOnWindowFocus: true,
+        staleTime: 30 * 1000,
+        refetchOnWindowFocus: false,
     });
 }
 
@@ -48,8 +46,8 @@ export function usePatientHistory(id: string) {
             return res.data?.data || res.data;
         },
         enabled: !!id,
-        staleTime: 0,
-        refetchOnWindowFocus: true,
+        staleTime: 30 * 1000,
+        refetchOnWindowFocus: false,
     });
 }
 
@@ -62,8 +60,8 @@ export function usePatientNotes(id: string) {
             return Array.isArray(payload) ? payload : [];
         },
         enabled: !!id,
-        staleTime: 0,
-        refetchOnWindowFocus: true,
+        staleTime: 30 * 1000,
+        refetchOnWindowFocus: false,
     });
 }
 
@@ -72,7 +70,7 @@ export function useCreatePatient() {
     return useMutation({
         mutationFn: async (dto: Record<string, unknown>) => {
             const res = await api.post('/patients', dto);
-            return res.data;
+            return res.data?.data || res.data;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['patients'] });
@@ -98,12 +96,27 @@ export function useUpdatePatient(id: string) {
 export function useAddClinicalNote(patientId: string) {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (dto: { note: string; type: string; toothNumbers?: number[] }) => {
+        mutationFn: async (dto: Record<string, unknown>) => {
             const res = await api.post(`/patients/${patientId}/notes`, dto);
             return res.data;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['patients', patientId, 'notes'] });
+        },
+    });
+}
+
+export function useUploadPatientDocument(patientId: string) {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (formData: FormData) => {
+            const res = await api.post(`/patients/${patientId}/documents`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            });
+            return res.data?.data || res.data;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['patients', patientId] });
         },
     });
 }

@@ -8,7 +8,7 @@ import {
     Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '../../components/ui/table';
 import { Badge } from '../../components/ui/badge';
-import { MoreHorizontal, Plus, Search, FileText, Loader2, Download, Bell } from 'lucide-react';
+import { MoreHorizontal, Plus, Search, FileText, Loader2, Download, Bell, Edit } from 'lucide-react';
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
@@ -175,6 +175,9 @@ export function BillingList() {
                                                     <DropdownMenuContent align="end">
                                                         <DropdownMenuItem onClick={() => navigate(`/billing/${invId}`)}>
                                                             <FileText className="mr-2 h-4 w-4" /> View Invoice
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => navigate(`/billing/edit/${invId}`)}>
+                                                            <Edit className="mr-2 h-4 w-4" /> Edit Invoice
                                                         </DropdownMenuItem>
                                                         <Dialog onOpenChange={(open) => {
                                                             if (open) {

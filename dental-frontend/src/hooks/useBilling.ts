@@ -20,8 +20,8 @@ export function useProcedures() {
             const payload = res.data?.data || res.data;
             return Array.isArray(payload) ? payload : [];
         },
-        staleTime: 0,
-        refetchOnWindowFocus: true,
+        staleTime: 5 * 60 * 1000, // 5 minutes
+        refetchOnWindowFocus: false,
     });
 }
 
@@ -48,6 +48,7 @@ export function useDoctors() {
             return Array.isArray(payload) ? payload : [];
         },
         staleTime: 5 * 60 * 1000, // 5 minutes cache
+        refetchOnWindowFocus: false,
     });
 }
 
@@ -60,8 +61,8 @@ export function useInvoices(filters: InvoiceFilters = {}) {
             const payload = res.data?.data || res.data;
             return Array.isArray(payload) ? payload : [];
         },
-        staleTime: 0,
-        refetchOnWindowFocus: true,
+        staleTime: 30 * 1000, // 30 seconds
+        refetchOnWindowFocus: false,
     });
 }
 
@@ -73,8 +74,8 @@ export function useInvoice(id: string) {
             return res.data?.data || res.data;
         },
         enabled: !!id,
-        staleTime: 0,
-        refetchOnWindowFocus: true,
+        staleTime: 30 * 1000,
+        refetchOnWindowFocus: false,
     });
 }
 
@@ -83,11 +84,25 @@ export function useCreateInvoice() {
     return useMutation({
         mutationFn: async (dto: Record<string, unknown>) => {
             const res = await api.post('/invoices', dto);
-            return res.data;
+            return res.data?.data || res.data;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['invoices'] });
             queryClient.invalidateQueries({ queryKey: ['reports', 'dashboard'] });
+        },
+    });
+}
+
+export function useUpdateInvoice() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async ({ id, dto }: { id: string; dto: Record<string, unknown> }) => {
+            const res = await api.patch(`/invoices/${id}`, dto);
+            return res.data?.data || res.data;
+        },
+        onSuccess: (_data, { id }) => {
+            queryClient.invalidateQueries({ queryKey: ['invoices', id] });
+            queryClient.invalidateQueries({ queryKey: ['invoices'] });
         },
     });
 }
@@ -113,7 +128,8 @@ export function useRecordPayment() {
             const res = await api.post(`/invoices/${id}/payment`, dto);
             return res.data;
         },
-        onSuccess: () => {
+        onSuccess: (_data, { id }) => {
+            queryClient.invalidateQueries({ queryKey: ['invoices', id] });
             queryClient.invalidateQueries({ queryKey: ['invoices'] });
             queryClient.invalidateQueries({ queryKey: ['reports', 'dashboard'] });
         },
@@ -152,8 +168,8 @@ export function useAdvanceBalance(patientId: string) {
             return res.data?.data || res.data || { balance: 0 };
         },
         enabled: !!patientId,
-        staleTime: 0,
-        refetchOnWindowFocus: true,
+        staleTime: 30 * 1000,
+        refetchOnWindowFocus: false,
     });
 }
 

@@ -11,7 +11,8 @@ import {
     AlertCircle, 
     CreditCard,
     FileText,
-    Loader2
+    Loader2,
+    Edit
 } from 'lucide-react';
 import {
     Table,
@@ -112,6 +113,9 @@ export function InvoiceDetails() {
             }
             action={
                 <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => navigate(`/billing/edit/${id}`)}>
+                        <Edit className="mr-2 h-4 w-4" /> Edit
+                    </Button>
                     <Button variant="outline" onClick={() => window.print()}>
                         <Printer className="mr-2 h-4 w-4" /> Print
                     </Button>

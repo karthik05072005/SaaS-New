@@ -37,8 +37,9 @@ export class AiService {
       const clinicAddress = 'our clinic location';
 
       // Format working hours (simplified for prompt)
-      const hoursList = tenant.settings?.workingHours
-        ? tenant.settings.workingHours
+      const settings = tenant.settings as any;
+      const hoursList = settings?.workingHours
+        ? settings.workingHours
           .map(
             (h) =>
               `${h.day}: ${h.isClosed ? 'Closed' : `${h.startTime}-${h.endTime}`}`,

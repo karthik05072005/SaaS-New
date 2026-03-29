@@ -5,14 +5,12 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { PrismaService } from '../database/prisma.service';
 import {
   Appointment,
-  AppointmentDocument,
   AppointmentStatus,
-} from './appointment.schema';
-import { DoctorLeave, DoctorLeaveDocument } from './doctor-leave.schema';
+  DoctorLeave,
+} from '@prisma/client';
 import {
   CreateAppointmentDto,
   UpdateAppointmentDto,
@@ -30,10 +28,7 @@ export class AppointmentsService {
   private readonly logger = new Logger(AppointmentsService.name);
 
   constructor(
-    @InjectModel(Appointment.name)
-    private appointmentModel: Model<AppointmentDocument>,
-    @InjectModel(DoctorLeave.name)
-    private doctorLeaveModel: Model<DoctorLeaveDocument>,
+    private prisma: PrismaService,
     private emailService: EmailService,
     private patientsService: PatientsService,
     private usersService: UsersService,
@@ -41,11 +36,6 @@ export class AppointmentsService {
   ) { }
 
   // ─── Slot Generation ───────────────────────────────────────────────────────
-  /**
-   * Returns available time slots for a given doctor on a given date.
-   * Slots are generated based on tenant's working hours and filtered
-   * against already-booked appointments and doctor leave.
-   */
   async getAvailableSlots(
     tenantId: string,
     doctorId: string,
@@ -59,22 +49,27 @@ export class AppointmentsService {
     dayEnd.setHours(23, 59, 59, 999);
 
     // Check if doctor is on leave
-    const onLeave = await this.doctorLeaveModel.findOne({
-      tenantId: new Types.ObjectId(tenantId),
-      doctorId: new Types.ObjectId(doctorId),
-      date: { $gte: dayStart, $lte: dayEnd },
-    } as any);
+    const onLeave = await this.prisma.doctorLeave.findFirst({
+      where: {
+        tenantId,
+        doctorId,
+        date: { gte: dayStart, lte: dayEnd },
+      },
+    });
     if (onLeave) return [];
 
     // Get booked slots for this doctor on this date
-    const bookedAppointments = await this.appointmentModel.find({
-      tenantId: new Types.ObjectId(tenantId),
-      doctorId: new Types.ObjectId(doctorId),
-      date: { $gte: dayStart, $lte: dayEnd },
-      status: {
-        $nin: [AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW],
+    const bookedAppointments = await this.prisma.appointment.findMany({
+      where: {
+        tenantId,
+        doctorId,
+        date: { gte: dayStart, lte: dayEnd },
+        status: {
+          notIn: [AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW],
+        },
       },
-    } as any);
+      select: { startTime: true },
+    });
 
     const bookedSlots = new Set(bookedAppointments.map((a) => a.startTime));
 
@@ -96,10 +91,6 @@ export class AppointmentsService {
   }
 
   // ─── Token Management ───────────────────────────────────────────────────────
-  /**
-   * Assigns the next sequential token number for a doctor on a given date.
-   * Tokens reset daily and are unique per doctor per day.
-   */
   private async getNextToken(
     tenantId: string,
     doctorId: string,
@@ -110,14 +101,15 @@ export class AppointmentsService {
     const dayEnd = new Date(date);
     dayEnd.setHours(23, 59, 59, 999);
 
-    const lastAppointment = await this.appointmentModel
-      .findOne({
-        tenantId: new Types.ObjectId(tenantId),
-        doctorId: new Types.ObjectId(doctorId),
-        date: { $gte: dayStart, $lte: dayEnd },
-        tokenNumber: { $exists: true },
-      } as any)
-      .sort({ tokenNumber: -1 });
+    const lastAppointment = await this.prisma.appointment.findFirst({
+      where: {
+        tenantId,
+        doctorId,
+        date: { gte: dayStart, lte: dayEnd },
+        tokenNumber: { not: null },
+      },
+      orderBy: { tokenNumber: 'desc' },
+    });
 
     return lastAppointment?.tokenNumber ? lastAppointment.tokenNumber + 1 : 1;
   }
@@ -127,7 +119,7 @@ export class AppointmentsService {
     tenantId: string,
     userId: string,
     dto: CreateAppointmentDto,
-  ): Promise<AppointmentDocument> {
+  ): Promise<Appointment> {
     const date = new Date(dto.date);
 
     // Conflict Prevention: check for overlapping appointments
@@ -136,15 +128,17 @@ export class AppointmentsService {
     const dayEnd = new Date(date);
     dayEnd.setHours(23, 59, 59, 999);
 
-    const conflict = await this.appointmentModel.findOne({
-      tenantId: new Types.ObjectId(tenantId),
-      doctorId: new Types.ObjectId(dto.doctorId),
-      date: { $gte: dayStart, $lte: dayEnd },
-      startTime: dto.startTime,
-      status: {
-        $nin: [AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW],
+    const conflict = await this.prisma.appointment.findFirst({
+      where: {
+        tenantId,
+        doctorId: dto.doctorId,
+        date: { gte: dayStart, lte: dayEnd },
+        startTime: dto.startTime,
+        status: {
+          notIn: [AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW],
+        },
       },
-    } as any);
+    });
 
     if (conflict) {
       throw new ConflictException(
@@ -154,21 +148,20 @@ export class AppointmentsService {
 
     const tokenNumber = await this.getNextToken(tenantId, dto.doctorId, date);
 
-    const appointment = new this.appointmentModel({
-      ...dto,
-      tenantId: new Types.ObjectId(tenantId),
-      patientId: new Types.ObjectId(dto.patientId),
-      doctorId: new Types.ObjectId(dto.doctorId),
-      date,
-      tokenNumber,
-      createdBy: new Types.ObjectId(userId),
+    const appointment = await this.prisma.appointment.create({
+      data: {
+        ...dto,
+        tenantId,
+        patientId: dto.patientId,
+        doctorId: dto.doctorId,
+        date,
+        tokenNumber,
+        createdByUserId: userId,
+      },
     });
 
-    const savedAppointment = await appointment.save();
-
-    // Send confirmation email to patient in the background (fire-and-forget)
-    // This prevents the booking API from hanging and timing out on serverless environments
-    this.sendAppointmentConfirmationEmail(tenantId, savedAppointment).catch(
+    // Send confirmation email asynchronously
+    this.sendAppointmentConfirmationEmail(tenantId, appointment as any).catch(
       (emailError) => {
         this.logger.error(
           `Failed to send confirmation email: ${emailError.message}`,
@@ -176,39 +169,22 @@ export class AppointmentsService {
       },
     );
 
-    return savedAppointment;
+    return appointment;
   }
 
   private async sendAppointmentConfirmationEmail(
     tenantId: string,
-    appointment: AppointmentDocument,
+    appointment: Appointment,
   ): Promise<void> {
-    // Get patient details
-    const patient = await this.patientsService.findById(
-      appointment.patientId.toString(),
-    );
-    if (!patient || !patient.email) {
-      this.logger.warn(`Patient not found or no email for appointment ${appointment._id}`);
-      return;
-    }
+    const patient = await this.patientsService.findById(appointment.patientId);
+    if (!patient || !patient.email) return;
 
-    // Get doctor details
-    const doctor = await this.usersService.findById(
-      appointment.doctorId.toString(),
-    );
-    if (!doctor) {
-      this.logger.warn(`Doctor not found for appointment ${appointment._id}`);
-      return;
-    }
+    const doctor = await this.usersService.findById(appointment.doctorId);
+    if (!doctor) return;
 
-    // Get tenant/clinic details
     const tenant = await this.tenantService.getTenantById(tenantId);
-    if (!tenant) {
-      this.logger.warn(`Tenant not found for appointment ${appointment._id}`);
-      return;
-    }
+    if (!tenant) return;
 
-    // Format date
     const appointmentDate = new Date(appointment.date);
     const formattedDate = appointmentDate.toLocaleDateString('en-IN', {
       weekday: 'long',
@@ -217,7 +193,6 @@ export class AppointmentsService {
       day: 'numeric',
     });
 
-    // Format time
     const [hours, minutes] = appointment.startTime.split(':');
     const startDate = new Date();
     startDate.setHours(parseInt(hours), parseInt(minutes));
@@ -234,10 +209,9 @@ export class AppointmentsService {
       appointmentDate: formattedDate,
       appointmentTime: formattedTime,
       appointmentType: appointment.type || 'Consultation',
-      chiefComplaint: appointment.chiefComplaint,
-      tokenNumber: appointment.tokenNumber,
-      clinicAddress: tenant.address ? `${tenant.address.street}, ${tenant.address.city}` : undefined,
-      clinicPhone: tenant.phone,
+      chiefComplaint: appointment.chiefComplaint || undefined,
+      tokenNumber: appointment.tokenNumber as number,
+      clinicPhone: tenant.phone as string,
     });
   }
 
@@ -247,13 +221,11 @@ export class AppointmentsService {
     filters: {
       date?: string;
       doctorId?: string;
-      status?: string;
+      status?: AppointmentStatus;
       patientId?: string;
     },
   ) {
-    const query: Record<string, unknown> = {
-      tenantId: new Types.ObjectId(tenantId),
-    };
+    const where: any = { tenantId };
 
     if (filters.date) {
       const day = new Date(filters.date);
@@ -261,25 +233,27 @@ export class AppointmentsService {
       start.setHours(0, 0, 0, 0);
       const end = new Date(day);
       end.setHours(23, 59, 59, 999);
-      query.date = { $gte: start, $lte: end };
+      where.date = { gte: start, lte: end };
     }
-    if (filters.doctorId) query.doctorId = new Types.ObjectId(filters.doctorId);
-    if (filters.status) query.status = filters.status;
-    if (filters.patientId)
-      query.patientId = new Types.ObjectId(filters.patientId);
+    if (filters.doctorId) where.doctorId = filters.doctorId;
+    if (filters.status) where.status = filters.status;
+    if (filters.patientId) where.patientId = filters.patientId;
 
     const { page = 1, limit = 20 } = pagination;
     const skip = (page - 1) * limit;
 
     const [data, total] = await Promise.all([
-      this.appointmentModel
-        .find(query as any)
-        .populate('patientId', 'name phone patientId')
-        .populate('doctorId', 'name email role')
-        .sort({ date: 1, startTime: 1 })
-        .skip(skip)
-        .limit(limit),
-      this.appointmentModel.countDocuments(query as any),
+      this.prisma.appointment.findMany({
+        where,
+        include: {
+          patient: { select: { name: true, phone: true, patientId: true } },
+          doctor: { select: { name: true, email: true, role: true } },
+        },
+        orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+        skip,
+        take: limit,
+      }),
+      this.prisma.appointment.count({ where }),
     ]);
 
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
@@ -289,99 +263,80 @@ export class AppointmentsService {
     tenantId: string | null,
     startDateStr: string,
     endDateStr: string,
-  ): Promise<AppointmentDocument[]> {
+  ): Promise<Appointment[]> {
     const startDate = new Date(startDateStr);
     startDate.setHours(0, 0, 0, 0);
 
     const endDate = new Date(endDateStr);
     endDate.setHours(23, 59, 59, 999);
 
-    const query: Record<string, unknown> = {
-      date: { $gte: startDate, $lte: endDate },
+    const where: any = {
+      date: { gte: startDate, lte: endDate },
     };
 
-    // Only filter by tenantId if provided
-    if (tenantId) {
-      query.tenantId = new Types.ObjectId(tenantId);
-    }
+    if (tenantId) where.tenantId = tenantId;
 
-    return this.appointmentModel
-      .find(query as any)
-      .lean() // Serverless optimization: returns raw JS objects, vastly reducing memory usage
-      .populate('patientId', 'name phone email patientId')
-      .populate('doctorId', 'name doctorProfile')
-      .exec() as unknown as AppointmentDocument[];
+    return this.prisma.appointment.findMany({
+      where,
+      include: {
+        patient: { select: { name: true, phone: true, email: true, patientId: true } },
+        doctor: { select: { name: true, doctorProfile: true } },
+      },
+    });
   }
 
-  async findOne(tenantId: string, id: string): Promise<AppointmentDocument> {
-    const appointment = await this.appointmentModel
-      .findOne({
-        _id: new Types.ObjectId(id),
-        tenantId: new Types.ObjectId(tenantId),
-      } as any)
-      .lean() // Serverless optimization: returns raw JS objects
-      .populate('patientId', 'name phone patientId photoUrl email')
-      .populate('doctorId', 'name email role doctorProfile')
-      .populate('createdBy', 'name email');
+  async findOne(tenantId: string, id: string): Promise<Appointment> {
+    const appointment = await this.prisma.appointment.findFirst({
+      where: { id, tenantId },
+      include: {
+        patient: { select: { name: true, phone: true, patientId: true, photoUrl: true, email: true } },
+        doctor: { select: { name: true, email: true, role: true, doctorProfile: true } },
+        createdByUser: { select: { name: true, email: true } },
+      },
+    });
 
     if (!appointment) throw new NotFoundException('Appointment not found');
-    return appointment as unknown as AppointmentDocument;
+    return appointment;
   }
 
   async update(
     tenantId: string,
     id: string,
     dto: UpdateAppointmentDto,
-  ): Promise<AppointmentDocument> {
-    const appointment = await this.appointmentModel.findOneAndUpdate(
-      {
-        _id: new Types.ObjectId(id),
-        tenantId: new Types.ObjectId(tenantId),
-      } as any,
-      { $set: dto },
-      { new: true },
-    );
-    if (!appointment) throw new NotFoundException('Appointment not found');
-    return appointment as unknown as AppointmentDocument;
+  ): Promise<Appointment> {
+    try {
+      return await this.prisma.appointment.update({
+        where: { id },
+        data: dto as any,
+      });
+    } catch (error) {
+      throw new NotFoundException('Appointment not found');
+    }
   }
 
   async updateStatus(
     tenantId: string,
     id: string,
     dto: UpdateStatusDto,
-  ): Promise<AppointmentDocument> {
-    const update: Record<string, unknown> = { status: dto.status };
-    if (dto.cancelledReason) update.cancelledReason = dto.cancelledReason;
-
-    const appointment = await this.appointmentModel.findOneAndUpdate(
-      {
-        _id: new Types.ObjectId(id),
-        tenantId: new Types.ObjectId(tenantId),
-      } as any,
-      { $set: update },
-      { new: true },
-    );
-    if (!appointment) throw new NotFoundException('Appointment not found');
-    return appointment as unknown as AppointmentDocument;
+  ): Promise<Appointment> {
+    return this.prisma.appointment.update({
+      where: { id },
+      data: {
+        status: dto.status as AppointmentStatus,
+        cancelledReason: dto.cancelledReason,
+      },
+    });
   }
 
   async cancel(
     tenantId: string,
     id: string,
     reason?: string,
-  ): Promise<AppointmentDocument> {
-    const appointment = await this.appointmentModel.findOneAndUpdate(
-      {
-        _id: new Types.ObjectId(id),
-        tenantId: new Types.ObjectId(tenantId),
-      } as any,
-      {
-        $set: { status: AppointmentStatus.CANCELLED, cancelledReason: reason },
-      },
-      { new: true },
-    );
-    if (!appointment) throw new NotFoundException('Appointment not found');
-    return appointment as unknown as AppointmentDocument;
+  ): Promise<Appointment> {
+    return this.prisma.appointment.update({
+      where: { id },
+      data: { status: AppointmentStatus.CANCELLED, cancelledReason: reason },
+    });
   }
 
   async getTodayAppointments(tenantId: string) {
@@ -391,19 +346,22 @@ export class AppointmentsService {
     const dayEnd = new Date(now);
     dayEnd.setHours(23, 59, 59, 999);
 
-    const appointments = await this.appointmentModel
-      .find({
-        tenantId: new Types.ObjectId(tenantId),
-        date: { $gte: dayStart, $lte: dayEnd },
-      } as any)
-      .populate('patientId', 'name phone patientId')
-      .populate('doctorId', 'name email')
-      .sort({ doctorId: 1, startTime: 1 });
+    const appointments = await this.prisma.appointment.findMany({
+      where: {
+        tenantId,
+        date: { gte: dayStart, lte: dayEnd },
+      },
+      include: {
+        patient: { select: { name: true, phone: true, patientId: true } },
+        doctor: { select: { name: true, email: true } },
+      },
+      orderBy: [{ doctorId: 'asc' }, { startTime: 'asc' }],
+    });
 
     // Group by doctor
-    const grouped: Record<string, AppointmentDocument[]> = {};
+    const grouped: Record<string, Appointment[]> = {};
     for (const appt of appointments) {
-      const doctorId = appt.doctorId.toString();
+      const doctorId = appt.doctorId;
       if (!grouped[doctorId]) grouped[doctorId] = [];
       grouped[doctorId].push(appt);
     }
@@ -414,48 +372,54 @@ export class AppointmentsService {
   async createDoctorLeave(
     tenantId: string,
     dto: CreateDoctorLeaveDto,
-  ): Promise<DoctorLeaveDocument> {
+  ): Promise<DoctorLeave> {
     const date = new Date(dto.date);
     const dayStart = new Date(date);
     dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(date);
     dayEnd.setHours(23, 59, 59, 999);
 
-    const existing = await this.doctorLeaveModel.findOne({
-      tenantId: new Types.ObjectId(tenantId),
-      doctorId: new Types.ObjectId(dto.doctorId),
-      date: { $gte: dayStart, $lte: dayEnd },
-    } as any);
+    const existing = await this.prisma.doctorLeave.findFirst({
+      where: {
+        tenantId,
+        doctorId: dto.doctorId,
+        date: { gte: dayStart, lte: dayEnd },
+      },
+    });
     if (existing)
       throw new ConflictException(
         'Leave already exists for this doctor on this date',
       );
 
-    const leave = new this.doctorLeaveModel({
-      tenantId: new Types.ObjectId(tenantId),
-      doctorId: new Types.ObjectId(dto.doctorId),
-      date,
-      reason: dto.reason,
+    return this.prisma.doctorLeave.create({
+      data: {
+        tenantId,
+        doctorId: dto.doctorId,
+        date,
+        reason: dto.reason,
+      },
     });
-    return leave.save();
   }
 
   async getDoctorLeaves(tenantId: string, doctorId?: string) {
-    const query: Record<string, unknown> = {
-      tenantId: new Types.ObjectId(tenantId),
-    };
-    if (doctorId) query.doctorId = new Types.ObjectId(doctorId);
-    return this.doctorLeaveModel
-      .find(query as any)
-      .populate('doctorId', 'name email')
-      .sort({ date: 1 });
+    const where: any = { tenantId };
+    if (doctorId) where.doctorId = doctorId;
+    return this.prisma.doctorLeave.findMany({
+      where,
+      include: {
+        doctor: { select: { name: true, email: true } },
+      },
+      orderBy: { date: 'asc' },
+    });
   }
 
   async deleteDoctorLeave(tenantId: string, id: string): Promise<void> {
-    const result = await this.doctorLeaveModel.findOneAndDelete({
-      _id: new Types.ObjectId(id),
-      tenantId: new Types.ObjectId(tenantId),
-    } as any);
-    if (!result) throw new NotFoundException('Doctor leave not found');
+    try {
+      await this.prisma.doctorLeave.delete({
+        where: { id },
+      });
+    } catch (error) {
+      throw new NotFoundException('Doctor leave not found');
+    }
   }
 }
